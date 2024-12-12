@@ -3,3 +3,6 @@ Measurement_Automatization_venv/
 
 # Ignore the srsinst.sr860 folder
 srsinst.sr860/
+
+# Ignore all output files
+*.csv

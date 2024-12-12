@@ -1,13 +1,18 @@
 import time
+import numpy as np
 import os
 import sys
 from ctypes import *
 from srsinst.sr860 import SR860
 import pyvisa as visa 
+import matplotlib.pyplot as plt
+import pandas as pd
+from datetime import datetime
+import argparse
 
 
-# Choose whether to see the precious troubleshooting messages
-Troubleshooting = True
+
+Troubleshooting = False
 
 def get_device_list_by_type(lib, device_type=0):
     # Create a buffer for the device list (max size: 512 bytes)
@@ -17,7 +22,10 @@ def get_device_list_by_type(lib, device_type=0):
     # Call TLI_GetDeviceListByTypeExt
     result = lib.TLI_GetDeviceListByTypeExt(receiveBuffer, buffer_size, device_type)
     if result != 0:
-        raise Exception(f"TLI_GetDeviceListByTypeExt failed with error code: {result}")
+        print(f"     Unable to connect to Delay Stage")
+        raise Exception(f"     TLI_GetDeviceListByTypeExt failed with error code: {result}")
+    elif Troubleshooting:
+            print(f"     TLI_GetDeviceListByTypeExt passed without raising errors")
 
     # Decode and parse the comma-separated serial numbers
     device_list = receiveBuffer.value.decode("utf-8").split(",")
@@ -100,7 +108,7 @@ def evaluate_status_bits(serial_num, channel, lib):
     status_bits.value = lib.BMC_GetStatusBits(serial_num, channel)
 
     # Print the raw status bits
-    print(f"Raw status bits: {bin(status_bits.value)}")
+    print(f"     Raw status bits: {bin(status_bits.value)}")
 
     # Iterate over each bitmask in the dictionary
     for bitmask, (description_0, description_1) in status_bit_descriptions.items():
@@ -114,8 +122,8 @@ def evaluate_status_bits(serial_num, channel, lib):
 def move_to_position(lib, serial_num, channel, position):
 
     # Set a new position in real units [mm]
-    #position = 300.0 # Below maximum (600.0mm)
-    print(f"New position: {position}mm")
+    if Troubleshooting:
+        print(f"     New position: {position}mm")
 
     # Convert to device units
     new_pos_real = c_double(position)  # in real units
@@ -126,37 +134,39 @@ def move_to_position(lib, serial_num, channel, position):
                                                 byref(new_pos_dev), 
                                                 c_int(0)) # Pass int 0 on last input to choose distance units
 
-    if result != 0 and Troubleshooting:
-        raise Exception(f"BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
-    else:
-        print("BMC_GetDeviceUnitFromRealValue passed without raising errors")
-    
-    print(f"About to move to: {new_pos_real.value} [mm], {new_pos_dev.value} [dev units]")
+    if result != 0:
+        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
+    elif Troubleshooting:
+            print(f"     BMC_GetDeviceUnitFromRealValue passed without raising errors")
+
+    print(f"     Moving to: {new_pos_real.value} [mm]")
+    if Troubleshooting:
+        print(f"     That position in device units is: {new_pos_dev.value} [dev units]")
 
     # Clear messaging que so that we can listen to the device for it's "finished moving" message
     result = lib.BMC_ClearMessageQueue(serial_num, channel)
-    if result != 0 and Troubleshooting:
-        raise Exception(f"BMC_ClearMessageQueue failed: {get_error_description(result)}")
-    else:
-        print("BMC_ClearMessageQueue passed without raising errors")
+    if result != 0:
+        raise Exception(f"     BMC_ClearMessageQueue failed: {get_error_description(result)}")
+    elif Troubleshooting:
+        print(f"     BMC_ClearMessageQueue passed without raising errors")
 
     # Feed the position now converted to device units to the device
 
     # This sleep function is sacred, society could collapse if you were to remove it
-    time.sleep(5)
+    time.sleep(1)
     result = lib.BMC_MoveToPosition(serial_num, channel, new_pos_dev)
-    if result != 0 and Troubleshooting:
-        raise Exception(f"BMC_MoveToPosition failed: {get_error_description(result)}")
-    else:
-        print("BMC_MoveToPosition passed without raising errors")    
-    time.sleep(5)
+    if result != 0:
+        raise Exception(f"     BMC_MoveToPosition failed: {get_error_description(result)}")
+    elif Troubleshooting:
+        print(f"     BMC_MoveToPosition passed without raising errors")    
+    time.sleep(1)
 
     
     ########################### Wait for "finished moving" message ###########################
 
     # Wait until we receive message that movement has finished
-    print(f"Moving to position {new_pos_real.value}")
-    
+    if Troubleshooting:
+        print(f"     Awaiting stop moving message")
     # Reset variables (they are on a passing state from previous loop)
     message_type = c_ushort()  # WORD
     message_id = c_ushort()    # WORD
@@ -173,16 +183,16 @@ def move_to_position(lib, serial_num, channel, position):
     # Ask the device to evaluate it's current position 
     # (both polling and this funciton will suppousedly prompt the device to evaluate it)
     result = lib.BMC_RequestPosition(serial_num, channel)
-    if result != 0 and Troubleshooting:
-        raise Exception(f"BMC_RequestPosition failed: {get_error_description(result)}")
-    else:
-        print("BMC_RequestPosition passed without raising errors")
+    if result != 0:
+        raise Exception(f"     BMC_RequestPosition failed: {get_error_description(result)}")
+    elif Troubleshooting:
+        print(f"     BMC_RequestPosition passed without raising errors")
     time.sleep(0.2)
 
     # Get the last known position from the device in "Device units"
     dev_pos = c_int(lib.BMC_GetPosition(serial_num, channel))
     if Troubleshooting:
-        print(f"device position in dev units: {dev_pos.value}")
+        print(f"     Device position in dev units: {dev_pos.value}")
 
     # Convert position from device units to real units
     real_pos = c_double()
@@ -192,7 +202,7 @@ def move_to_position(lib, serial_num, channel, position):
                                     byref(real_pos),
                                     c_int(0))
 
-    print(f'Arrived at position: {real_pos.value}')
+    print(f'     Arrived at position: {real_pos.value}')
 
     return dev_pos
 
@@ -200,7 +210,9 @@ def move_to_position(lib, serial_num, channel, position):
 
 ####################################### MAIN CODE #######################################
 
-def main():
+def main(start_position, end_position, step_size, Troubleshooting):
+
+    print(f"Initializing\n")
     
     if sys.version_info < (3, 8):
         os.chdir(r"C:\Program Files\Thorlabs\Kinesis")
@@ -221,6 +233,7 @@ def main():
 
     # Use a try loop to catch exceptions when loading risky functions that might fail
     try:
+        print(f"Configuring delay stage:")
         ########################### Build device list ###########################
         result = lib.TLI_BuildDeviceList()
         time.sleep(1)
@@ -229,31 +242,32 @@ def main():
         # the return is non 0. The program will stop, throwing it to terminal in 
         # case any of their outputs correlate with an internal error
         if result != 0 and Troubleshooting:
-            raise Exception(f"TLI_BuildDeviceList failed: {get_error_description(result)}")
+            raise Exception(f"     TLI_BuildDeviceList failed: {get_error_description(result)}")
 
         else:
-            print("TLI_BuildDeviceList succeeded")
-
             # Look at the list of connected devices and actually check whether our particular stage is there
-            if (Troubleshooting):
+        
+            # Get the list of all BBD301 devices (their device's ID is 103)
+            device_list = get_device_list_by_type(lib, device_type=103)
 
-                # Get the list of all BBD301 devices (their device's ID is 103)
-                device_list = get_device_list_by_type(lib, device_type=103)
+            if "103391384" in device_list:
+                print(f"    Succesfuly found delay stage in device list")
 
-                if "103391384" in device_list:
-                    print(f"BBD301's serial number IS in list: {device_list}")
-                else:
-                    print(f"BBD301's serial number is NOT in list: {device_list}")
-                    print("Troubleshooting tip:\nTry closing Kinesis Software if ti's open\nTry disconnecting and connecting USB cable")
+            else:
+                print(f"       BBD301's serial number is NOT in list: {device_list}")
+                print(f"    Troubleshooting tip:\nTry closing Kinesis Software if ti's open\nTry disconnecting and connecting USB cable")
+                raise Exception(f"     delay stage with serial number {serial_num.value} not in device list")
 
 
             ########################### Open the device ###########################
             result = lib.BMC_Open(serial_num)
             time.sleep(1)
-            if result != 0 and Troubleshooting:
-                raise Exception(f"BMC_Open failed: {get_error_description(result)}")
-            else:
-                print("BMC_Open passed without raising errors")
+            if result != 0:
+                raise Exception(f"     BMC_Open failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"    BMC_Open passed without raising errors")
+            
+            print(f"    Succesfuly connected to Delay Stage")
 
             ########################### Load Settings ###########################
             # This step fixes a bug where the device doesn't know how to convert real units to device units 
@@ -263,60 +277,62 @@ def main():
             result = lib.BMC_LoadSettings(serial_num, channel)
 
             # This time the function returns a 0 for error and no error code
-            if  Troubleshooting and result == 0:
-                raise Exception(f"BMC_LoadSettings failed")
-            else:
-                print("BMC_LoadSettings passed without raising errors")
+            if  result == 0:
+                raise Exception(f"     BMC_LoadSettings failed")
+            elif Troubleshooting:
+                print(f"    BMC_LoadSettings passed without raising errors")
 
 
             ########################### Enable the motor channel ###########################
             result = lib.BMC_EnableChannel(serial_num, channel)
             time.sleep(1)
-            if result != 0 and Troubleshooting:
-                raise Exception(f"BMC_EnableChannel failed: {get_error_description(result)}")
-            else:
-                print(f"BMC_EnableChannel passed without raising erros, enabled channel: {channel.value}")
+            if result != 0:
+                raise Exception(f"     BMC_EnableChannel failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"     BMC_EnableChannel passed without raising erros, enabled channel: {channel.value}")
+            
+            print(f"     Succesfuly enabled channel {channel.value}")
 
 
             ########################### Start polling ###########################
             result = lib.BMC_StartPolling(serial_num, c_int(200))
             time.sleep(3)
-            if result != 0 and Troubleshooting:
-                raise Exception(f"BMC_StartPolling failed: {get_error_description(result)}")
-            else:
-                print("BMC_StartPolling passed without raising errors")
+            if result != 0:
+                raise Exception(f"     BMC_StartPolling failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"    BMC_StartPolling passed without raising errors")
 
 
             ########################### Move ###########################
             # Question the device whether we need to home the motor before moving
             can_move_without_homing_flag = c_bool()
             result = lib.BMC_CanMoveWithoutHomingFirst(byref(can_move_without_homing_flag)) # byref(variable) is a C pointer to that variable
-            if result != 0 and Troubleshooting:
-                raise Exception(f"BMC_CanMoveWithoutHomingFirst failed: {get_error_description(result)}")
-            else:
-                print("BMC_CanMoveWithoutHomingFirst passed without raising errors")
+            if result != 0:
+                raise Exception(f"     BMC_CanMoveWithoutHomingFirst failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"    BMC_CanMoveWithoutHomingFirst passed without raising errors")
             
             # The funciton will return True when we can move without homing first
             if (not can_move_without_homing_flag.value): # variable.value is how we "cast" a C variable back to Python
 
                 ########################### Home first ###########################
-                print("Device needs to be homed")
+                print(f"    Delay stage needs to be homed before moving")
                 
                 # Clear messaging que so that we can listen to the device for it's "finished homing" message
                 result = lib.BMC_ClearMessageQueue(serial_num, channel)
-                if result != 0 and Troubleshooting:
-                    raise Exception(f"BMC_ClearMessageQueue failed: {get_error_description(result)}")
-                else:
-                    print("BMC_ClearMessageQueue passed without raising errors")
+                if result != 0:
+                    raise Exception(f"     BMC_ClearMessageQueue failed: {get_error_description(result)}")
+                elif Troubleshooting:
+                    print(f"    BMC_ClearMessageQueue passed without raising errors")
 
                 # Home the stage
                 result = lib.BMC_Home(serial_num, channel)
                 time.sleep(1)
-                if result != 0 and Troubleshooting:
-                    raise Exception(f"BMC_Home failed: {get_error_description(result)}")
-                else:
-                    print("BMC_Home passed without raising errors")
-                print("Homing now")
+                if result != 0:
+                    raise Exception(f"     BMC_Home failed: {get_error_description(result)}")
+                elif Troubleshooting:
+                    print(f"    BMC_Home passed without raising errors")
+                print(f"    Homing now")
 
                 # Wait until we receive a message signaling homing completion
                 message_type = c_ushort()  # WORD
@@ -326,21 +342,20 @@ def main():
                     result = lib.BMC_GetNextMessage(serial_num, channel, 
                                                     byref(message_type), byref(message_id), byref(message_data))
                 
-                #print("What kind of status bits should we expected after homing?")
-                #evaluate_status_bits(serial_num, channel, lib)
+                print(f"    Finished homing delay stage")
 
             else:
-                print("Device doesn't need homing")
+                print(f"    Device doesn't need homing")
 
             ########################### Change velocity parameters ###########################
             # We set the parameters to the default that we see on screen when switching on the machine
-            # We do this because Thorlabs engineers sell a 11K€ machine with some piece of shit software that
+            # We do this because Thorlabs engineers sell a 11K€ machine with some piece of sh*t software that
             # will immediately shoot your stage into over limit speeds when you run their github example with it
             # The machine will catch this self destruction attempt and stop itself abruptly (without throwing any
-            # errors mind you). So we need to input these parameters when loading.
-            # Don't trust their repo, don't trust their C_API, verify anything and everything these lazy engineers do            
-            acceleration_real = c_double(100.0) # in mm/s^2
-            max_velocity_real = c_double(10.0) # in mm/s 
+            # errors mind you). So we need to manually input some safe parameters when loading.
+            # Don't trust their repo, don't trust their C_API docs, verify anything and everything these lazy engineers do            
+            acceleration_real = c_double(900.0) # in mm/s^2
+            max_velocity_real = c_double(45.0) # in mm/s 
 
             # We convert them to device units
             acceleration_dev = c_int()
@@ -350,36 +365,38 @@ def main():
                                                         max_velocity_real, 
                                                         byref(max_velocity_dev), 
                                                         c_int(1)) # Pass int 1 to convert to device velocity units
-            if result != 0 and Troubleshooting:
-                raise Exception(f"BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
-            else:
-                print("BMC_GetDeviceUnitFromRealValue passed without raising errors")
+            if result != 0:
+                raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
             result = lib.BMC_GetDeviceUnitFromRealValue(serial_num,
                                             channel, 
                                             acceleration_real, 
                                             byref(acceleration_dev), 
                                             c_int(2)) # Pass int 2 to convert to device acceleration units
-            if result != 0 and Troubleshooting:
-                raise Exception(f"BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
-            else:
-                print("BMC_GetDeviceUnitFromRealValue passed without raising errors")                                
+            if result != 0:
+                raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")                                
 
             result = lib.BMC_SetVelParams(serial_num, channel, acceleration_dev, max_velocity_dev)
             if result != 0:
-                raise Exception(f"BMC_SetVelParams failed: {get_error_description(result)}")
-            else:
-                print("BMC_SetVelParams passed without raising errors")
-            print(f"Set max velocity param to {max_velocity_real.value}mm/s or {max_velocity_dev.value}dev units/s")
-            print(f"Set acceleration param to {acceleration_real.value}mm/s^2 or {acceleration_dev.value}dev units/s^2")
-            print("Checking velocity params")
+                raise Exception(f"     BMC_SetVelParams failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"    BMC_SetVelParams passed without raising errors")
+
+            if Troubleshooting:
+                print(f"       Set max velocity param to {max_velocity_real.value}mm/s or {max_velocity_dev.value}dev units/s")
+                print(f"       Set acceleration param to {acceleration_real.value}mm/s^2 or {acceleration_dev.value}dev units/s^2")
+                print(f"    Checking velocity params")
             acceleration_dev = c_int()
             max_velocity_dev = c_int()
             result = lib.BMC_GetVelParams(serial_num, channel, byref(acceleration_dev),  byref(max_velocity_dev))
-            if result != 0 and Troubleshooting:
-                raise Exception(f"BMC_GetVelParams failed: {get_error_description(result)}")
-            else:
-                print("BMC_GetVelParams passed without raising errors")
+            if result != 0:
+                raise Exception(f"     BMC_GetVelParams failed: {get_error_description(result)}")
+            elif Troubleshooting:
+                print(f"    BMC_GetVelParams passed without raising errors")
 
             # Convert to real units
             max_velocity_real = c_double()
@@ -395,24 +412,115 @@ def main():
                                                 c_int(int(acceleration_dev.value)),
                                                 byref(acceleration_real),
                                                 c_int(2)) # Pass 2 for acceleration
-            print(f"Read max velocity param to {max_velocity_real.value}mm/s or {max_velocity_dev.value}dev units/s")
-            print(f"Read acceleration param to {acceleration_real.value}mm/s^2 or {acceleration_dev.value}dev units/s^2")
+            print(f"       Succesfuly set stage's max velocity to {max_velocity_real.value}mm/s")
+            print(f"       Succesfuly set stage's acceleration to {acceleration_real.value}mm/s^2")
+            
+            print(f"    Delay Stage is configured and ready\n")
 
-            ########################### Move to position ###########################
+            ########################### Establish lockin connection ###########################
+            
+            print(f"Configuring Lockin Amplifier:")
+            print(f"    Attempting to connect to Lockin Amplifer")
+            lockin_USB_port = 'COM5'
+            lockin = SR860()
+            try:
+                lockin.connect('serial', lockin_USB_port)
 
-            move_to_position(lib, serial_num, channel, position=40)
-            move_to_position(lib, serial_num, channel, position=100)
+            except Exception as e:
+                print(f"Error{e}\nTroubleshooting:\n    1) Try to disconnect and recconnect the lockin USB then retry\n    2) If the problem persists verify that lockin is connected at {lockin_USB_port} on Windows device manager, if not change to correct port")
+            print(f"    Succesfuly connected to Lockin Amplifier\n")
 
+            ########################### Perform experiment ###########################
+            print(f"Measurement starts now:")
+            # Define scan parameters
+            limit_position__start = 0
+            limit_position_end = 600
+            settling_time = 5*lockin.signal.time_constant
+
+
+            # Create a list to store both positions to scan and rms voltages measured
+            Positions = []
+            Position_within_limtis = True
+
+            # Edge case: First position is computed outside the loop
+            new_position = start_position
+
+            # Check that the new computed position is whithin stage travel limits
+            if (start_position <= new_position <= end_position):
+                Positions.append(new_position)
+
+            # Following positions will be computed on the loop
+            while(Position_within_limtis):
+
+                new_position = new_position + step_size
+
+                # Check that the new computed position is whithin stage travel limits
+                if (start_position <= new_position <= end_position):
+                    Positions.append(new_position)
+                
+                # If not within limits then we stop adding new steps
+                else:
+                    Position_within_limtis = False
+
+                    # Add end position if not in list already
+                    if (new_position != end_position):
+                        Positions.append(end_position)
+
+            Data = np.zeros_like(np.array(Positions))
+
+            # Scan each position
+            for index in range(0, len(Positions)):
+
+                print(f"    Measurement at step: {index+1} of {len(Positions)}")
+                move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
+                
+                print(f"    Awaiting for filter settling")
+                time.sleep(settling_time)                                             # Settle
+                
+                print(f"    Capturing data")
+                Data[index] = lockin.data.value['R']                                  # Capture
+                print("\n")
+
+            print(f"    Experiment is finished\n")                
+
+
+            ########################### Store and display data ###########################
+
+            # Store data
+            print(f"Storing data on CSV file")
+            # Create a DataFrame with headers
+            df = pd.DataFrame({
+                "Time (s)": np.array(Positions),
+                "Voltage (Vrms)": Data
+            })
+
+            # Create a title with a date for the CSV file
+            # Get current date as a string
+            date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
+            CSV_file_title = "Experiment_" + date_string + ".csv"
+
+            # Write to a CSV file
+            df.to_csv(CSV_file_title, index=False)
+
+            print(f"Showing curve on screen, please close the graphs window to finsih")
+            # Show data
+            plt.plot(Positions, Data)
+            plt.xlabel('Delay position (mm)')
+            plt.ylabel('Measured PD voltage (Vrms)')
+            #plt.legend()
+            plt.show()
 
             ########################### Close the device ###########################
             lib.BMC_StopPolling(serial_num, channel) # Does not return error codes
             
             result = lib.BMC_Close(serial_num)
             time.sleep(1)
-            if result != 0 and Troubleshooting:
+            if result != 0:
                 raise Exception(f"BMC_Close failed: {get_error_description(result)}")
-            else:
-                print("BMC_Close passed without raising errors")
+            elif Troubleshooting:
+                print(f"BMC_Close passed without raising errors")
+            
+            print(f"Succesfully closed communications to Delay Stage")
 
 
     # If any exception was caught while running the code above the program stops and 
@@ -420,5 +528,23 @@ def main():
     except Exception as e:
         print(e)
 
+
+########################### Parse variables passed from terminal by user ###########################
+
 if __name__ == "__main__":
-    main()
+    # Create an argument parser
+    parser = argparse.ArgumentParser(description="Run the experiment with specified parameters.")
+
+    # Add arguments for configuration variables
+    parser.add_argument("--start_position", type=float, required=True, help="Set position to start scan from in mm (minimum is 0 maximum is 600)")
+    parser.add_argument("--end_position", type=float, required=True, help="Set position to end scan at in mm (minimum is 0 maximum is 600)")
+    parser.add_argument("--step_size", type=int, required=True, help="Set the step size in mm")
+    parser.add_argument("--Troubleshooting", type=bool, default=False, help="Choose whether to get a step by step verification of the C_API functions that passed (default: False)")
+
+
+    # Parse arguments from the command line
+    args = parser.parse_args()
+
+    # Pass the arguments to the experiment function
+    main(args.start_position, args.end_position, args.step_size, args.Troubleshooting)
+
