@@ -431,84 +431,102 @@ def main(start_position, end_position, step_size, Troubleshooting):
             print(f"    Succesfuly connected to Lockin Amplifier\n")
 
             ########################### Perform experiment ###########################
-            print(f"Measurement starts now:")
-            # Define scan parameters
-            limit_position__start = 0
-            limit_position_end = 600
-            settling_time = 5*lockin.signal.time_constant
+
+            # Repeat experiments without homing again
+            New_Experiment = True
+            while (New_Experiment):
+                print(f"Measurement starts now:")
+                # Define scan parameters
+                limit_position__start = 0
+                limit_position_end = 600
+                settling_time = 5*lockin.signal.time_constant
 
 
-            # Create a list to store both positions to scan and rms voltages measured
-            Positions = []
-            Position_within_limtis = True
+                # Create a list to store both positions to scan and rms voltages measured
+                Positions = []
+                Position_within_limtis = True
 
-            # Edge case: First position is computed outside the loop
-            new_position = start_position
-
-            # Check that the new computed position is whithin stage travel limits
-            if (start_position <= new_position <= end_position):
-                Positions.append(new_position)
-
-            # Following positions will be computed on the loop
-            while(Position_within_limtis):
-
-                new_position = new_position + step_size
+                # Edge case: First position is computed outside the loop
+                new_position = start_position
 
                 # Check that the new computed position is whithin stage travel limits
                 if (start_position <= new_position <= end_position):
                     Positions.append(new_position)
-                
-                # If not within limits then we stop adding new steps
-                else:
-                    Position_within_limtis = False
 
-                    # Add end position if not in list already
-                    if (new_position != end_position):
-                        Positions.append(end_position)
+                # Following positions will be computed on the loop
+                while(Position_within_limtis):
 
-            Data = np.zeros_like(np.array(Positions))
+                    new_position = new_position + step_size
 
-            # Scan each position
-            for index in range(0, len(Positions)):
+                    # Check that the new computed position is whithin stage travel limits
+                    if (start_position <= new_position <= end_position):
+                        Positions.append(new_position)
+                    
+                    # If not within limits then we stop adding new steps
+                    else:
+                        Position_within_limtis = False
 
-                print(f"    Measurement at step: {index+1} of {len(Positions)}")
-                move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
-                
-                print(f"    Awaiting for filter settling")
-                time.sleep(settling_time)                                             # Settle
-                
-                print(f"    Capturing data")
-                Data[index] = lockin.data.value['R']                                  # Capture
-                print("\n")
+                        # Add end position if not in list already
+                        if (new_position != end_position):
+                            Positions.append(end_position)
 
-            print(f"    Experiment is finished\n")                
+                Data = np.zeros_like(np.array(Positions))
+
+                # Scan each position
+                for index in range(0, len(Positions)):
+
+                    print(f"    Measurement at step: {index+1} of {len(Positions)}")
+                    move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
+                    
+                    print(f"    Awaiting for filter settling")
+                    time.sleep(settling_time)                                             # Settle
+                    
+                    print(f"    Capturing data")
+                    Data[index] = lockin.data.value['R']                                  # Capture
+                    print("\n")
+
+                print(f"    Experiment is finished\n")                
 
 
-            ########################### Store and display data ###########################
+                ########################### Store and display data ###########################
 
-            # Store data
-            print(f"Storing data on CSV file")
-            # Create a DataFrame with headers
-            df = pd.DataFrame({
-                "Time (s)": np.array(Positions),
-                "Voltage (Vrms)": Data
-            })
+                # Store data
+                print(f"Storing data on CSV file")
 
-            # Create a title with a date for the CSV file
-            # Get current date as a string
-            date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
-            CSV_file_title = "Experiment_" + date_string + ".csv"
+                # Create a DataFrame with headers
+                df = pd.DataFrame({
+                    "Delay position (mm)": np.array(Positions),
+                    "Voltage from PD (Vrms)": Data
+                })
 
-            # Write to a CSV file
-            df.to_csv(CSV_file_title, index=False)
+                # Create a title with a date for the CSV file
+                # Get current date as a string
+                date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
+                CSV_file_title = "Experiment_" + date_string + ".csv"
 
-            print(f"Showing curve on screen, please close the graphs window to finsih")
-            # Show data
-            plt.plot(Positions, Data)
-            plt.xlabel('Delay position (mm)')
-            plt.ylabel('Measured PD voltage (Vrms)')
-            #plt.legend()
-            plt.show()
+                # Create a string storing relevant experiment data
+                experiment_params = str(f"Lockin was configurated to\n  time constant: {lockin.signal.time_constant}s?, filter slope: {lockin.signal.filter_slope}dB/?, input range: {lockin.signal.voltage_input_range}V?")
+
+                # Write the parameters and data to a CSV file
+                with open(CSV_file_title, "w") as file:
+                    file.write(f"# {experiment_params}\n")  # Add the parameters as a comment line
+                    df.to_csv(file, index=False)
+
+                print(f"Showing curve on screen, please close the graphs window to continue")
+                # Show data
+                plt.plot(Positions, Data)
+                plt.xlabel('Delay position (mm)')
+                plt.ylabel('Measured PD voltage (Vrms)')
+                #plt.legend()
+                plt.show()
+
+                # Request user to whether they want to perform a new experiment
+                user_input = input("To perform a new experiment input: y\n To close the program input: n\n")
+                if (user_input == "y"):
+                    New_Experiment = True
+                if (user_input == "n"):
+                    New_Experiment = False
+
 
             ########################### Close the device ###########################
             lib.BMC_StopPolling(serial_num, channel) # Does not return error codes
