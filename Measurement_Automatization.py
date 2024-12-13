@@ -1,3 +1,13 @@
+# TO DO list
+# 
+# · Make it so whenever you do a new experiment you can change parameters without homing
+# · Give a time estimation before starting the experiment, allow user to change variables if they didn't like the time estimation
+# · Make it so if an error is caught user can fix it and then continue code execution from where it was left
+#  
+
+
+
+
 import time
 import numpy as np
 import os
@@ -512,7 +522,7 @@ def main(start_position, end_position, step_size, Troubleshooting):
                     file.write(f"# {experiment_params}\n")  # Add the parameters as a comment line
                     df.to_csv(file, index=False)
 
-                print(f"Showing curve on screen, please close the graphs window to continue")
+                print(f"Showing curve on screen, please close the graphs window to continue7")
                 # Show data
                 plt.plot(Positions, Data)
                 plt.xlabel('Delay position (mm)')
