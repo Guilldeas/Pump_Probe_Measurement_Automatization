@@ -1,7 +1,8 @@
 # TO DO list
 # 
-# · Make it so whenever you do a new experiment you can change parameters without homing
-# · Give a time estimation before starting the experiment, allow user to change variables if they didn't like the time estimation
+# · Check LP settling time (depends on filter slope too)
+# · Solve bug where integer scan distance / step size causes repetition of last step
+# · Store data on neat dedicated folders, exclude them form git
 # · Make it so if an error is caught user can fix it and then continue code execution from where it was left
 #  
 
@@ -19,6 +20,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
 import argparse
+import math
 
 
 
@@ -218,11 +220,38 @@ def move_to_position(lib, serial_num, channel, position):
 
 
 
+def is_valid_file_name(file_name):
+    # Define invalid characters for Windows file names
+    invalid_chars = '<>:"/\\|?*'
+    # Reserved file names in Windows
+    reserved_names = ["CON", "PRN", "AUX", "NUL"] + \
+                     [f"COM{i}" for i in range(1, 10)] + \
+                     [f"LPT{i}" for i in range(1, 10)]
+    
+    # Check for invalid characters
+    for char in invalid_chars:
+        if char in file_name:
+            return False
+    
+    # Check for reserved names
+    if file_name.upper() in reserved_names:
+        return False
+    
+    # Check for trailing dots or spaces
+    if file_name.endswith('.') or file_name.endswith(' '):
+        return False
+    
+    # File name is valid
+    return True
+
+
+
+
 ####################################### MAIN CODE #######################################
 
-def main(start_position, end_position, step_size, Troubleshooting):
+def main(Troubleshooting):
 
-    print(f"Initializing\n")
+    print(f"Please wait for initial setup\n")
     
     if sys.version_info < (3, 8):
         os.chdir(r"C:\Program Files\Thorlabs\Kinesis")
@@ -265,7 +294,7 @@ def main(start_position, end_position, step_size, Troubleshooting):
 
             else:
                 print(f"       BBD301's serial number is NOT in list: {device_list}")
-                print(f"    Troubleshooting tip:\nTry closing Kinesis Software if ti's open\nTry disconnecting and connecting USB cable")
+                print(f"    Troubleshooting tip:\n    Try closing Kinesis Software if it's open\n    Try disconnecting and connecting USB cable")
                 raise Exception(f"     delay stage with serial number {serial_num.value} not in device list")
 
 
@@ -427,6 +456,8 @@ def main(start_position, end_position, step_size, Troubleshooting):
             
             print(f"    Delay Stage is configured and ready\n")
 
+
+
             ########################### Establish lockin connection ###########################
             
             print(f"Configuring Lockin Amplifier:")
@@ -440,17 +471,90 @@ def main(start_position, end_position, step_size, Troubleshooting):
                 print(f"Error{e}\nTroubleshooting:\n    1) Try to disconnect and recconnect the lockin USB then retry\n    2) If the problem persists verify that lockin is connected at {lockin_USB_port} on Windows device manager, if not change to correct port")
             print(f"    Succesfuly connected to Lockin Amplifier\n")
 
-            ########################### Perform experiment ###########################
+            print("Inital setup finished.\n")
+
+            ########################### Request scan parameters to user ###########################
+
+            # Time between singal change and lockin's LP settling, I need it here to estimate experiment duration 
+            settling_time = 5*lockin.signal.time_constant
 
             # Repeat experiments without homing again
             New_Experiment = True
             while (New_Experiment):
-                print(f"Measurement starts now:")
-                # Define scan parameters
-                limit_position__start = 0
-                limit_position_end = 600
-                settling_time = 5*lockin.signal.time_constant
 
+                    
+                # Request scan variables to user at the begining of the experiment
+                print("Please introduce the following parameters to define the scan:")
+
+                finished_taking_params = False
+                while(not finished_taking_params):
+                    
+                    # Only allow variables within reasonable limits
+                    print("\n")
+                    parameter_is_valid = False
+                    while not parameter_is_valid:
+                        start_position = float(input("    Initial position (between 0.0 and 600.0, use decimal point) [mm]: "))
+
+                        if (0.0 <= start_position < 600.0):
+                            parameter_is_valid = True
+
+                        else:
+                            print("    Please introduce a start position between 0.0 and 600.0!")
+
+                    print("\n")
+                    parameter_is_valid = False
+                    while not parameter_is_valid:
+                        end_position = float(input("    Final position (greater than initial position) [mm]: "))
+
+                        if (0.0 < end_position <= 600.0) and (end_position > start_position):
+                            parameter_is_valid = True
+
+                        else:
+                            print("    Please introduce an end position greater than the initial position and between 0.0 and 600.0!")
+
+                    print("\n")
+                    parameter_is_valid = False
+                    while not parameter_is_valid:
+                        step_size = float(input("    Step size [mm]: "))
+
+                        if (0.0 < step_size < 600.0) and (step_size <= end_position-start_position):
+                            parameter_is_valid = True
+
+                        else:
+                            print("    Please introduce a positive step size that is smaller or equal to the scan range!")
+
+                    # Estimate execution time for the parameters selected and report to user
+                    print("\n")
+                    average_step_duration_sec = 6 + settling_time
+                    num_steps = math.ceil( (end_position - start_position) / step_size )
+                    estimated_duration = int(average_step_duration_sec * num_steps / 60) # in mins
+
+                    print(f"    Experiment is estimated to take {estimated_duration}min for these parameters.")
+                    print("    If you wish to change them input: n, if you wish to continue input: y")
+                    user_input = input("")
+                    if user_input == "y":
+                        finished_taking_params = True
+                    
+                    else:
+                        finished_taking_params = False
+                        print("    Please input new parameters")
+                    
+
+                # Get file name to store data
+                print("\n")
+                parameter_is_valid = False
+                while not parameter_is_valid:
+                    experiment_title = input("    Please introduce title for experiment (avoid using special characters): ")
+                    
+                    if(is_valid_file_name(experiment_title)):
+                        parameter_is_valid = True
+                    
+                    else:
+                        print("    Please avoid invalid characters for Windows files")
+                
+
+
+                ########################### Build scan positions list ###########################
 
                 # Create a list to store both positions to scan and rms voltages measured
                 Positions = []
@@ -482,9 +586,14 @@ def main(start_position, end_position, step_size, Troubleshooting):
 
                 Data = np.zeros_like(np.array(Positions))
 
-                # Scan each position
-                for index in range(0, len(Positions)):
 
+
+
+                ########################### Scan and Measure at list of positions ###########################
+                
+                for index in range(0, len(Positions)-1):
+
+                    
                     print(f"    Measurement at step: {index+1} of {len(Positions)}")
                     move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
                     
@@ -495,7 +604,9 @@ def main(start_position, end_position, step_size, Troubleshooting):
                     Data[index] = lockin.data.value['R']                                  # Capture
                     print("\n")
 
+
                 print(f"    Experiment is finished\n")                
+
 
 
                 ########################### Store and display data ###########################
@@ -512,10 +623,10 @@ def main(start_position, end_position, step_size, Troubleshooting):
                 # Create a title with a date for the CSV file
                 # Get current date as a string
                 date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
-                CSV_file_title = "Experiment_" + date_string + ".csv"
+                CSV_file_title = experiment_title + ".csv"
 
                 # Create a string storing relevant experiment data
-                experiment_params = str(f"Lockin was configurated to\n  time constant: {lockin.signal.time_constant}s?, filter slope: {lockin.signal.filter_slope}dB/?, input range: {lockin.signal.voltage_input_range}V?")
+                experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {lockin.signal.time_constant}s?,Filter slope: {lockin.signal.filter_slope}dB/?,Input range: {lockin.signal.voltage_input_range}V?")
 
                 # Write the parameters and data to a CSV file
                 with open(CSV_file_title, "w") as file:
@@ -538,6 +649,7 @@ def main(start_position, end_position, step_size, Troubleshooting):
                     New_Experiment = False
 
 
+
             ########################### Close the device ###########################
             lib.BMC_StopPolling(serial_num, channel) # Does not return error codes
             
@@ -557,6 +669,8 @@ def main(start_position, end_position, step_size, Troubleshooting):
         print(e)
 
 
+
+
 ########################### Parse variables passed from terminal by user ###########################
 
 if __name__ == "__main__":
@@ -564,9 +678,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the experiment with specified parameters.")
 
     # Add arguments for configuration variables
-    parser.add_argument("--start_position", type=float, required=True, help="Set position to start scan from in mm (minimum is 0 maximum is 600)")
-    parser.add_argument("--end_position", type=float, required=True, help="Set position to end scan at in mm (minimum is 0 maximum is 600)")
-    parser.add_argument("--step_size", type=int, required=True, help="Set the step size in mm")
     parser.add_argument("--Troubleshooting", type=bool, default=False, help="Choose whether to get a step by step verification of the C_API functions that passed (default: False)")
 
 
@@ -574,5 +685,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Pass the arguments to the experiment function
-    main(args.start_position, args.end_position, args.step_size, args.Troubleshooting)
+    main(args.Troubleshooting)
 
