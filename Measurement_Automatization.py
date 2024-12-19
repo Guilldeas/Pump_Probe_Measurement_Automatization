@@ -1,9 +1,10 @@
 # TO DO list
 # 
 # · Check LP settling time (depends on filter slope too)
-# · Solve bug where integer scan distance / step size causes repetition of last step
-# · Store data on neat dedicated folders, exclude them form git
+# · work in ps
+# · Store data on neat dedicated folders (exclude them form git)
 # · Make it so if an error is caught user can fix it and then continue code execution from where it was left
+# · Verify whether reference input impedance is 50 or 1Meg 
 #  
 
 
@@ -14,235 +15,16 @@ import numpy as np
 import os
 import sys
 from ctypes import *
-from srsinst.sr860 import SR860
 import pyvisa as visa 
 import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
 import argparse
 import math
+from pymeasure.adapters import SerialAdapter
+import Measurement_Automatization_Functions as MAfun
 
 
-
-Troubleshooting = False
-
-def get_device_list_by_type(lib, device_type=0):
-    # Create a buffer for the device list (max size: 512 bytes)
-    buffer_size = 512
-    receiveBuffer = create_string_buffer(buffer_size)
-
-    # Call TLI_GetDeviceListByTypeExt
-    result = lib.TLI_GetDeviceListByTypeExt(receiveBuffer, buffer_size, device_type)
-    if result != 0:
-        print(f"     Unable to connect to Delay Stage")
-        raise Exception(f"     TLI_GetDeviceListByTypeExt failed with error code: {result}")
-    elif Troubleshooting:
-            print(f"     TLI_GetDeviceListByTypeExt passed without raising errors")
-
-    # Decode and parse the comma-separated serial numbers
-    device_list = receiveBuffer.value.decode("utf-8").split(",")
-    return device_list
-
-
-# Error descriptions dictionary. These errors are documented on the "Thorlabs Kinesis C API" HTML at this folder
-# the C functions controlling the stage will return a 0 if nothing went wrong or any of these numbers if something 
-# failed, the corresponding descriptions are extracted through get_error_description()
-error_descriptions = {
-    0: "FT_OK - Success",
-    1: "FTDI and Communication error: FT_InvalidHandle - The FTDI functions have not been initialized.\nNote: This error get's thrown down a lot for reasons unrelated to device initialization",
-    2: "FTDI and Communication error: FT_DeviceNotFound - Device not found. Ensure TLI_BuildDeviceList has been called.",
-    3: "FTDI and Communication error: FT_DeviceNotOpened - The Device must be opened before it can be accessed. See the appropriate Open function for your device.",
-    4: "FTDI and Communication error: FT_IOError - An I/O Error has occured in the FTDI chip.",
-    5: "FTDI and Communication error: FT_InsufficientResources - There are Insufficient resources to run this application.",
-    6: "FTDI and Communication error: FT_InvalidParameter - An invalid parameter has been supplied to the device. ",
-    7: "FTDI and Communication error: FT_DeviceNotPresent - The Device is no longer present. The device may have been disconnected since the last TLI_BuildDeviceList() call. ",
-    8: "FTDI and Communication error: FT_IncorrectDevice - The device detected does not match that expected./term> ",
-    16: "Device Library Error: FT_NoDLLLoaded - The library for this device could not be found",
-    17: "Device Library Error: FT_NoFunctionsAvailable - No functions available for this device",
-    18: "Device Library Error: FT_FunctionNotAvailable - The function is not available for this device",
-    19: "Device Library Error: FT_BadFunctionPointer - Bad function pointer detected",
-    20: "Device Library Error: FT_GenericFunctionFail - The function failed to complete succesfully",
-    21: "Device Library Error: FT_SpecificFunctionFail - The function failed to complete succesfully",
-    32: "General DLL control error: TL_ALREADY_OPEN - Attempt to open a device that was already open. ",
-    33: "General DLL control error: TL_NO_RESPONSE - The device has stopped responding. ",
-    34: "General DLL control error: TL_NOT_IMPLEMENTED - This function has not been implemented. ",
-    35: "General DLL control error: TL_FAULT_REPORTED - The device has reported a fault. ",
-    36: "General DLL control error: TL_INVALID_OPERATION - The function could not be completed at this time. ",
-    40: "General DLL control error: TL_DISCONNECTING - The function could not be completed because the device is disconnected",
-    41: "General DLL control error: TL_FIRMWARE_BUG - The firmware has thrown an error ",
-    42: "General DLL control error: TL_INITIALIZATION_FAILURE - The device has failed to initialize ",
-    43: "General DLL control error: TL_INVALID_CHANNEL - An Invalid channel address was supplied ",
-    37: "Motor Specific Error: TL_UNHOMED - The device cannot perform this function until it has been Homed",
-    38: "Motor Specific Error: TL_INVALID_POSITION - The function cannot be performed as it would result in an illegal position. ",
-    39: "Motor Specific Error: TL_INVALID_VELOCITY_PARAMETER - An invalid velocity parameter was supplied. The velocity must be greater than zero. ",
-    44: "Motor Specific Error: TL_CANNOT_HOME_DEVICE - This device does not support Homing. Check the Limit switch parameters are correct.",
-    45: "Motor Specific Error: TL_JOG_CONTINOUS_MODE - An invalid jog mode was supplied for the jog function.",
-    46: "Motor Specific Error: TL_NO_MOTOR_INFO - There is no Motor Parameters available to convert Real World Units. ",
-    47: "Motor Specific Error: TL_CMD_TEMP_UNAVAILABLE - Command temporarily unavailable, Device may be busy."
-}
-
-
-def get_error_description(code):
-    return error_descriptions.get(code, f"Unknown error with code: {code}")
-
-
-def evaluate_status_bits(serial_num, channel, lib):
-    # Dictionary of status bit descriptions with meaning for both 0 and 1 states
-    status_bit_descriptions = {
-        0x00000001: ("CW hardware limit switch: No contact", "CW hardware limit switch: Contact"),
-        0x00000002: ("CCW hardware limit switch: No contact", "CCW hardware limit switch: Contact"),
-        0x00000004: ("CW software limit switch: No contact", "CW software limit switch: Contact"),
-        0x00000008: ("CCW software limit switch: No contact", "CCW software limit switch: Contact"),
-        0x00000010: ("Motor shaft not moving clockwise", "Motor shaft moving clockwise"),
-        0x00000020: ("Motor shaft not moving counterclockwise", "Motor shaft moving counterclockwise"),
-        0x00000040: ("Shaft not jogging clockwise", "Shaft jogging clockwise"),
-        0x00000080: ("Shaft not jogging counterclockwise", "Shaft jogging counterclockwise"),
-        0x00000100: ("Motor not connected", "Motor connected"),
-        0x00000200: ("Motor not homing", "Motor homing"),
-        0x00000400: ("Motor not homed", "Motor homed"),
-        0x00001000: ("Trajectory not within tracking window", "Trajectory within tracking window"),
-        0x00002000: ("Axis not within settled window", "Axis within settled window"),
-        0x00004000: ("Axis within position error limit", "Axis exceeds position error limit"),
-        0x00008000: ("No position module instruction error", "Position module instruction error exists"),
-        0x00010000: ("Interlock link present in motor connector", "Interlock link missing in motor connector"),
-        0x00020000: ("No position module over temperature warning", "Position module over temperature warning"),
-        0x00040000: ("No position module bus voltage fault", "Position module bus voltage fault"),
-        0x00080000: ("No axis commutation error", "Axis commutation error"),
-        0x01000000: ("Axis phase current below limit", "Axis phase current exceeded limit"),
-        0x80000000: ("Channel disabled", "Channel enabled"),
-        
-    }
-
-    # Create a ctype variable for the returned DWORD
-    status_bits = c_uint()
-
-    # Call the function and get the status bits
-    status_bits.value = lib.BMC_GetStatusBits(serial_num, channel)
-
-    # Print the raw status bits
-    print(f"     Raw status bits: {bin(status_bits.value)}")
-
-    # Iterate over each bitmask in the dictionary
-    for bitmask, (description_0, description_1) in status_bit_descriptions.items():
-        # Check if the specific bit is set or not
-        if (status_bits.value & bitmask) == bitmask:
-            print(f"{description_1}")  # Bit is set
-        else:
-            print(f"{description_0}")  # Bit is not set
-
-
-def move_to_position(lib, serial_num, channel, position):
-
-    # Set a new position in real units [mm]
-    if Troubleshooting:
-        print(f"     New position: {position}mm")
-
-    # Convert to device units
-    new_pos_real = c_double(position)  # in real units
-    new_pos_dev = c_int()
-    result = lib.BMC_GetDeviceUnitFromRealValue(serial_num,
-                                                channel, 
-                                                new_pos_real, 
-                                                byref(new_pos_dev), 
-                                                c_int(0)) # Pass int 0 on last input to choose distance units
-
-    if result != 0:
-        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
-    elif Troubleshooting:
-            print(f"     BMC_GetDeviceUnitFromRealValue passed without raising errors")
-
-    print(f"     Moving to: {new_pos_real.value} [mm]")
-    if Troubleshooting:
-        print(f"     That position in device units is: {new_pos_dev.value} [dev units]")
-
-    # Clear messaging que so that we can listen to the device for it's "finished moving" message
-    result = lib.BMC_ClearMessageQueue(serial_num, channel)
-    if result != 0:
-        raise Exception(f"     BMC_ClearMessageQueue failed: {get_error_description(result)}")
-    elif Troubleshooting:
-        print(f"     BMC_ClearMessageQueue passed without raising errors")
-
-    # Feed the position now converted to device units to the device
-
-    # This sleep function is sacred, society could collapse if you were to remove it
-    time.sleep(1)
-    result = lib.BMC_MoveToPosition(serial_num, channel, new_pos_dev)
-    if result != 0:
-        raise Exception(f"     BMC_MoveToPosition failed: {get_error_description(result)}")
-    elif Troubleshooting:
-        print(f"     BMC_MoveToPosition passed without raising errors")    
-    time.sleep(1)
-
-    
-    ########################### Wait for "finished moving" message ###########################
-
-    # Wait until we receive message that movement has finished
-    if Troubleshooting:
-        print(f"     Awaiting stop moving message")
-    # Reset variables (they are on a passing state from previous loop)
-    message_type = c_ushort()  # WORD
-    message_id = c_ushort()    # WORD
-    message_data = c_uint()    # DWORD
-    # Wait for "done moving" message
-    while not (message_type.value == 2 and message_id.value == 1):
-        result = lib.BMC_GetNextMessage(serial_num, channel, 
-                                        byref(message_type), byref(message_id), byref(message_data))
-        
-    
-
-    ########################### Read final position ###########################
-
-    # Ask the device to evaluate it's current position 
-    # (both polling and this funciton will suppousedly prompt the device to evaluate it)
-    result = lib.BMC_RequestPosition(serial_num, channel)
-    if result != 0:
-        raise Exception(f"     BMC_RequestPosition failed: {get_error_description(result)}")
-    elif Troubleshooting:
-        print(f"     BMC_RequestPosition passed without raising errors")
-    time.sleep(0.2)
-
-    # Get the last known position from the device in "Device units"
-    dev_pos = c_int(lib.BMC_GetPosition(serial_num, channel))
-    if Troubleshooting:
-        print(f"     Device position in dev units: {dev_pos.value}")
-
-    # Convert position from device units to real units
-    real_pos = c_double()
-    lib.BMC_GetRealValueFromDeviceUnit(serial_num,
-                                        channel,
-                                    dev_pos,
-                                    byref(real_pos),
-                                    c_int(0))
-
-    print(f'     Arrived at position: {real_pos.value}')
-
-    return dev_pos
-
-
-
-def is_valid_file_name(file_name):
-    # Define invalid characters for Windows file names
-    invalid_chars = '<>:"/\\|?*'
-    # Reserved file names in Windows
-    reserved_names = ["CON", "PRN", "AUX", "NUL"] + \
-                     [f"COM{i}" for i in range(1, 10)] + \
-                     [f"LPT{i}" for i in range(1, 10)]
-    
-    # Check for invalid characters
-    for char in invalid_chars:
-        if char in file_name:
-            return False
-    
-    # Check for reserved names
-    if file_name.upper() in reserved_names:
-        return False
-    
-    # Check for trailing dots or spaces
-    if file_name.endswith('.') or file_name.endswith(' '):
-        return False
-    
-    # File name is valid
-    return True
 
 
 
@@ -281,13 +63,13 @@ def main(Troubleshooting):
         # the return is non 0. The program will stop, throwing it to terminal in 
         # case any of their outputs correlate with an internal error
         if result != 0 and Troubleshooting:
-            raise Exception(f"     TLI_BuildDeviceList failed: {get_error_description(result)}")
+            raise Exception(f"     TLI_BuildDeviceList failed: {MAfun.get_error_description(result)}")
 
         else:
             # Look at the list of connected devices and actually check whether our particular stage is there
         
             # Get the list of all BBD301 devices (their device's ID is 103)
-            device_list = get_device_list_by_type(lib, device_type=103)
+            device_list = MAfun.get_device_list_by_type(lib, device_type=103)
 
             if "103391384" in device_list:
                 print(f"    Succesfuly found delay stage in device list")
@@ -302,7 +84,7 @@ def main(Troubleshooting):
             result = lib.BMC_Open(serial_num)
             time.sleep(1)
             if result != 0:
-                raise Exception(f"     BMC_Open failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_Open failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"    BMC_Open passed without raising errors")
             
@@ -326,7 +108,7 @@ def main(Troubleshooting):
             result = lib.BMC_EnableChannel(serial_num, channel)
             time.sleep(1)
             if result != 0:
-                raise Exception(f"     BMC_EnableChannel failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_EnableChannel failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"     BMC_EnableChannel passed without raising erros, enabled channel: {channel.value}")
             
@@ -337,7 +119,7 @@ def main(Troubleshooting):
             result = lib.BMC_StartPolling(serial_num, c_int(200))
             time.sleep(3)
             if result != 0:
-                raise Exception(f"     BMC_StartPolling failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_StartPolling failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"    BMC_StartPolling passed without raising errors")
 
@@ -347,7 +129,7 @@ def main(Troubleshooting):
             can_move_without_homing_flag = c_bool()
             result = lib.BMC_CanMoveWithoutHomingFirst(byref(can_move_without_homing_flag)) # byref(variable) is a C pointer to that variable
             if result != 0:
-                raise Exception(f"     BMC_CanMoveWithoutHomingFirst failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_CanMoveWithoutHomingFirst failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"    BMC_CanMoveWithoutHomingFirst passed without raising errors")
             
@@ -360,7 +142,7 @@ def main(Troubleshooting):
                 # Clear messaging que so that we can listen to the device for it's "finished homing" message
                 result = lib.BMC_ClearMessageQueue(serial_num, channel)
                 if result != 0:
-                    raise Exception(f"     BMC_ClearMessageQueue failed: {get_error_description(result)}")
+                    raise Exception(f"     BMC_ClearMessageQueue failed: {MAfun.get_error_description(result)}")
                 elif Troubleshooting:
                     print(f"    BMC_ClearMessageQueue passed without raising errors")
 
@@ -368,7 +150,7 @@ def main(Troubleshooting):
                 result = lib.BMC_Home(serial_num, channel)
                 time.sleep(1)
                 if result != 0:
-                    raise Exception(f"     BMC_Home failed: {get_error_description(result)}")
+                    raise Exception(f"     BMC_Home failed: {MAfun.get_error_description(result)}")
                 elif Troubleshooting:
                     print(f"    BMC_Home passed without raising errors")
                 print(f"    Homing now")
@@ -405,7 +187,7 @@ def main(Troubleshooting):
                                                         byref(max_velocity_dev), 
                                                         c_int(1)) # Pass int 1 to convert to device velocity units
             if result != 0:
-                raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
@@ -415,13 +197,13 @@ def main(Troubleshooting):
                                             byref(acceleration_dev), 
                                             c_int(2)) # Pass int 2 to convert to device acceleration units
             if result != 0:
-                raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")                                
 
             result = lib.BMC_SetVelParams(serial_num, channel, acceleration_dev, max_velocity_dev)
             if result != 0:
-                raise Exception(f"     BMC_SetVelParams failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_SetVelParams failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"    BMC_SetVelParams passed without raising errors")
 
@@ -433,7 +215,7 @@ def main(Troubleshooting):
             max_velocity_dev = c_int()
             result = lib.BMC_GetVelParams(serial_num, channel, byref(acceleration_dev),  byref(max_velocity_dev))
             if result != 0:
-                raise Exception(f"     BMC_GetVelParams failed: {get_error_description(result)}")
+                raise Exception(f"     BMC_GetVelParams failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"    BMC_GetVelParams passed without raising errors")
 
@@ -462,21 +244,26 @@ def main(Troubleshooting):
             
             print(f"Configuring Lockin Amplifier:")
             print(f"    Attempting to connect to Lockin Amplifer")
-            lockin_USB_port = 'COM5'
-            lockin = SR860()
+            lockin_USB_port = "COM5"
             try:
-                lockin.connect('serial', lockin_USB_port)
+                adapter = MAfun.initialize_connection(port=lockin_USB_port, baudrate=115200, timeout=1)
 
             except Exception as e:
                 print(f"Error{e}\nTroubleshooting:\n    1) Try to disconnect and recconnect the lockin USB then retry\n    2) If the problem persists verify that lockin is connected at {lockin_USB_port} on Windows device manager, if not change to correct port")
             print(f"    Succesfuly connected to Lockin Amplifier\n")
 
+            print(f"    Configuring lockin amplifier")
+
+            try:
+                MAfun.configure_lockin(adapter)  
+            except Exception as e:
+                print(f"    Error while configuring lockin amplifier {e}") 
+
             print("Inital setup finished.\n")
 
-            ########################### Request scan parameters to user ###########################
 
-            # Time between singal change and lockin's LP settling, I need it here to estimate experiment duration 
-            settling_time = 5*lockin.signal.time_constant
+
+            ########################### Request scan parameters to user ###########################
 
             # Repeat experiments without homing again
             New_Experiment = True
@@ -525,7 +312,11 @@ def main(Troubleshooting):
 
                     # Estimate execution time for the parameters selected and report to user
                     print("\n")
-                    average_step_duration_sec = 6 + settling_time
+
+                    # Time between singal change and lockin's LP settling, I need it here to estimate experiment duration 
+                    time_constant = MAfun.request_time_constant(adapter)
+                    settling_time = 5*time_constant
+                    average_step_duration_sec = 0.5 + settling_time
                     num_steps = math.ceil( (end_position - start_position) / step_size )
                     estimated_duration = int(average_step_duration_sec * num_steps / 60) # in mins
 
@@ -546,7 +337,7 @@ def main(Troubleshooting):
                 while not parameter_is_valid:
                     experiment_title = input("    Please introduce title for experiment (avoid using special characters): ")
                     
-                    if(is_valid_file_name(experiment_title)):
+                    if(MAfun.is_valid_file_name(experiment_title)):
                         parameter_is_valid = True
                     
                     else:
@@ -581,7 +372,7 @@ def main(Troubleshooting):
                         Position_within_limtis = False
 
                         # Add end position if not in list already
-                        if (new_position != end_position):
+                        if (end_position not in Positions):
                             Positions.append(end_position)
 
                 Data = np.zeros_like(np.array(Positions))
@@ -591,19 +382,21 @@ def main(Troubleshooting):
 
                 ########################### Scan and Measure at list of positions ###########################
                 
-                for index in range(0, len(Positions)-1):
+                MAfun.autorange(adapter)
+                MAfun.set_sensitivity(adapter, MAfun.find_next_sensitivity(adapter))
+
+                for index in range(0, len(Positions)):
 
                     
                     print(f"    Measurement at step: {index+1} of {len(Positions)}")
-                    move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
+                    MAfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
                     
                     print(f"    Awaiting for filter settling")
-                    time.sleep(settling_time)                                             # Settle
+                    time.sleep(settling_time)                                                   # Settle
                     
                     print(f"    Capturing data")
-                    Data[index] = lockin.data.value['R']                                  # Capture
+                    Data[index] = MAfun.request_R(adapter)                                      # Capture
                     print("\n")
-
 
                 print(f"    Experiment is finished\n")                
 
@@ -611,7 +404,25 @@ def main(Troubleshooting):
 
                 ########################### Store and display data ###########################
 
-                # Store data
+                # Create a folder to store data into
+
+                # Get the directory of the current script
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+
+                # Get the parent directory
+                parent_dir = os.path.dirname(current_dir)
+
+                # Define the Output folder path
+                output_folder = os.path.join(parent_dir, "Output")
+
+                # Create the Output folder if it doesn't exist
+                if not os.path.exists(output_folder):
+                    os.makedirs(output_folder)
+                    print(f"Created folder: {output_folder}")
+                
+                # Create a subfolder at Output to store the experiment data
+                data_folder = os.path.join(output_folder, experiment_title)
+            
                 print(f"Storing data on CSV file")
 
                 # Create a DataFrame with headers
@@ -620,13 +431,12 @@ def main(Troubleshooting):
                     "Voltage from PD (Vrms)": Data
                 })
 
-                # Create a title with a date for the CSV file
                 # Get current date as a string
                 date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
                 CSV_file_title = experiment_title + ".csv"
 
                 # Create a string storing relevant experiment data
-                experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {lockin.signal.time_constant}s?,Filter slope: {lockin.signal.filter_slope}dB/?,Input range: {lockin.signal.voltage_input_range}V?")
+                experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {time_constant}s,Filter slope: {MAfun.request_filter_slope(adapter)}dB/Oct,Input range: {MAfun.request_range(adapter)}V")
 
                 # Write the parameters and data to a CSV file
                 with open(CSV_file_title, "w") as file:
@@ -656,11 +466,15 @@ def main(Troubleshooting):
             result = lib.BMC_Close(serial_num)
             time.sleep(1)
             if result != 0:
-                raise Exception(f"BMC_Close failed: {get_error_description(result)}")
+                raise Exception(f"BMC_Close failed: {MAfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"BMC_Close passed without raising errors")
             
             print(f"Succesfully closed communications to Delay Stage")
+
+            MAfun.close_connection(adapter)
+            print("Succesfully closed connection to lockin")
+            
 
 
     # If any exception was caught while running the code above the program stops and 
