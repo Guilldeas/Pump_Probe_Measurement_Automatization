@@ -1,7 +1,7 @@
 import tkinter as tk
 
 # Fakey fake params in main code. A dict holds both the parameters name and it's default value
-# perhaps store them in a CSV and retreive form it at the start? 
+# perhaps store them in a CSV and retreive from it at the start? 
 default_values_delay_stage = {
     "Serial number:": "103391384",
     "Channel:": 1,
