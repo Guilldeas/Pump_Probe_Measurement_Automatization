@@ -1,0 +1,13 @@
+{
+    "Delay Stage Default Config Params": {
+        "SerialNumber": "103391384",
+        "Channel": 1,
+        "Acceleration_mm_per_s2": 900.0,
+        "MaxVelocity_mm_per_s": 45.0
+    },
+    "Lockin Default Config Params": {
+        "USBPort": "COM5",
+        "BaudRate": 115200,
+        "TimeoutSeconds": 5
+    }
+}

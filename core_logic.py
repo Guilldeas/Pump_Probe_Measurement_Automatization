@@ -15,13 +15,10 @@ import numpy as np
 import os
 import sys
 from ctypes import *
-import pyvisa as visa 
 import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
-import argparse
 import math
-from pymeasure.adapters import SerialAdapter
 import Measurement_Automatization_Functions as MAfun
 
 
@@ -35,10 +32,14 @@ def initialization(Troubleshooting):
 
     print(f"Please wait for initial setup\n")
     
-    if sys.version_info < (3, 8):
-        os.chdir(r"C:\Program Files\Thorlabs\Kinesis")
-    else:
-        os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
+    try:
+        if sys.version_info < (3, 8):
+            os.chdir(r"C:\Program Files\Thorlabs\Kinesis")
+        else:
+            os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
+    except Exception as e:
+        print(f"Error while loading Thorlabs' Kinesis lirbary: {e}")
+        print("Have you installed the Kinesis sotware?")
 
     global lib 
     lib = cdll.LoadLibrary("Thorlabs.MotionControl.Benchtop.BrushlessMotor.dll")
@@ -486,12 +487,12 @@ def perform_experiment(Troubleshooting):
             print("Succesfully closed connection to lockin")
             
 
-def main(Troubleshooting=False):
+'''def main(Troubleshooting=False):
 
     initialization(Troubleshooting)
     perform_experiment(Troubleshooting)
 
-main()
+main()'''
 
 '''
 ########################### Parse variables passed from terminal by user ###########################

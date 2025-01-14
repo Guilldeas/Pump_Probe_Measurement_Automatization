@@ -1,18 +1,18 @@
 import tkinter as tk
+import json
+import core_logic
 
-# Fakey fake params in main code. A dict holds both the parameters name and it's default value
-# perhaps store them in a CSV and retreive from it at the start? 
-default_values_delay_stage = {
-    "Serial number:": "103391384",
-    "Channel:": 1,
-    "Acceleration[mm/s^2]:": 900.0,
-    "Max velocity[mm/s]:": 45.0
-}
-default_values_lockin = {
-    "USB port:" : "COM5",
-    "Baud rate" : 115200
-}
 
+# Extract default configuration values for both devices from the configuration file
+with open('Utils\default_config.json', "r") as json_file:
+    default_config = json.load(json_file)
+
+default_values_delay_stage = default_config["Delay Stage Default Config Params"]
+default_values_lockin = default_config["Lockin Default Config Params"]
+
+
+
+############################### Start drawing GUI ###############################
 # Create the main window
 root = tk.Tk()
 root.title("User Input Example")
@@ -103,6 +103,11 @@ for parameter, default_value in default_values_lockin.items():
     row_num += 1
 
 
+
+
+Troubleshooting = False
+core_logic.initialization(Troubleshooting)
+core_logic.perform_experiment(Troubleshooting)
 
 
 '''
