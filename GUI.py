@@ -1,113 +1,200 @@
 import tkinter as tk
+from tkinter import ttk
 import json
 import core_logic
+import threading
 
 
-# Extract default configuration values for both devices from the configuration file
-with open('Utils\default_config.json', "r") as json_file:
-    default_config = json.load(json_file)
+def show_screen(screen_name):
+    """
+    Switch to the selected screen.
+    """
+    # Hide all frames
+    for frame in Screens.values():
+        frame.pack_forget()
+    
+    # Show the selected frame
+    Screens[screen_name].pack(fill="both", expand=True)
 
-default_values_delay_stage = default_config["Delay Stage Default Config Params"]
-default_values_lockin = default_config["Lockin Default Config Params"]
 
+# BUG: Calling this more than once before the thread is joined will throw an error!
+# Solve with callback?
+def initialize_button():
+    initialization_thread.start()
 
+def GUI():
+    # Extract default configuration values for both devices from the configuration file
+    with open('Utils\default_config.json', "r") as json_file:
+        default_config = json.load(json_file)
 
-############################### Start drawing GUI ###############################
-# Create the main window
-root = tk.Tk()
-root.title("User Input Example")
-root.geometry("400x300")
-
-# Add text (label) prompting user to introduce configuration parameters
-label = tk.Label(root, text="Enter device initialization parameters", anchor="w")
-
-# The widgets will be placed in a grid with respect each other,
-#  to define their separation we define a "no place" x and y pad radius measured 10px around them
-# finally we specify to format them to the left or west of their "cell"
-row_num = 0
-label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-
-# Place an empty label at the end to add some space
-spacer = tk.Label(root, text="")  # An empty label
-spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
-row_num += 1
+    default_values_delay_stage = default_config["Delay Stage Default Config Params"]
+    default_values_lockin = default_config["Lockin Default Config Params"]
 
 
 
-############################### Section for delay stage ###############################
-# To create a section we use a frame which we will treat code wise as a window  in which 
-# to place our widgets, this has the added benefit of referencing these widgets on a new subgrid, 
-# it's more modular too since we can rearrange the whole frame without loosing the reference 
-delay_parameters_frame = tk.Frame(root)
+    ############################### Start drawing GUI ###############################
+    # Create the main window
+    main_window = tk.Tk()
+    main_window.title("Automatic Pump Probe")
+    main_window.geometry("1024x768")
 
-# We place the frame indexing it to the main window grid
-delay_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+    # There are different screens (dramfes) in this GUI, each serves a different funciton 
+    # and must display different frames to change between them we must store them into a
+    # dict after building them
+    global Screens 
+    Screens = {}
 
-# Instead of placing it in the main window we place it on the frame
-row_num = 0
-label = tk.Label(delay_parameters_frame, text="Delay stage parameters", anchor="w")
-label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-row_num += 1
+    ################################### Initialization Screen #########################
+    # We create a frame that will contain everything under this screen, this frame will
+    # be shown or hidden depending on what screen we want to display
+    Initialization_screen = tk.Frame(main_window)
+    Screens["Initialization screen"] = Initialization_screen
 
-# Add labels in succession
-delay_stage_input_parameters = ["Serial number:", "Channel:", "Acceleration[mm/s^2]:", "Max veocity[mm/s]"]
-for parameter, default_value in default_values_delay_stage.items():
+    # Add text (label) prompting user to introduce configuration parameters
+    label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
 
-    # For every parameter the user will input add a short description with a label 
-    label = tk.Label(delay_parameters_frame, text=parameter, anchor="w")
+    # The widgets will be placed in a grid with respect each other,
+    # to define their separation we define a "no place" x and y pad radius measured 10px around them
+    # finally we specify "w" to format them to the left or west of their "cell"
+    row_num = 0
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
-    # Add an entry box for the user to write a parameter on the cell and place it to the right
-    entry = tk.Entry(delay_parameters_frame)
-    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
-
-    # Fill entry box with the default value
-    entry.insert(0, str(default_value))
-
-    # Following labels and entry boxes will be written a row below
-    row_num += 1
-
-# Spacing at the end of the section with empty labels
-spacer = tk.Label(delay_parameters_frame, text="")  # An empty label
-spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
-
-
-
-
-############################### Section for delay stage ###############################
-# Repeat for lockin parameters
-lockin_parameters_frame = tk.Frame(root)
-lockin_parameters_frame.grid(row=2, column=0, padx=10, pady=10, sticky="w")
-
-row_num = 0
-label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
-label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-row_num += 1
-
-# Add labels in succession
-lockin_input_parameters = ["USB port:", "Baud Rate:"]
-for parameter, default_value in default_values_lockin.items():
-
-    # For every parameter the user will input add a short description with a label 
-    label = tk.Label(lockin_parameters_frame, text=parameter, anchor="w")
-    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-
-    # Add an entry box for the user to write a parameter on the cell and place it to the right
-    entry = tk.Entry(lockin_parameters_frame)
-    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
-
-    # Fill entry box with the default value
-    entry.insert(0, str(default_value))
-
-    # Following labels and entry boxes will be written a row below
+    # Place an empty label at the end to add some space
+    spacer = tk.Label(Initialization_screen, text="")  # An empty label
+    spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
     row_num += 1
 
 
 
+    ############################### Frame for delay stage ###############################
+    # To create a section we use a frame which we will treat code wise as a window in which 
+    # to place our widgets, this has the added benefit of referencing these widgets on a new subgrid, 
+    # it's more modular too since we can rearrange the whole frame without loosing the reference
+    # between widgets  
 
-Troubleshooting = False
-core_logic.initialization(Troubleshooting)
-core_logic.perform_experiment(Troubleshooting)
+    # We place the frame indexing it to the initialization screen frame
+    delay_parameters_frame = tk.Frame(Initialization_screen)
+    delay_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+
+    row_num = 0
+    label = tk.Label(delay_parameters_frame,  # Instead of placing the widget in the main window we now place it on the frame
+                     text="Delay stage parameters",
+                     anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    row_num += 1
+
+    # Add labels in succession
+    for parameter, default_value in default_values_delay_stage.items():
+
+        # For every parameter the user will input add a short description with a label 
+        label = tk.Label(delay_parameters_frame, text=parameter, anchor="w")
+        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+
+        # Add an entry box for the user to write a parameter on the cell and place it to the right
+        entry = tk.Entry(delay_parameters_frame)
+        entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+
+        # Fill entry box with the default value
+        entry.insert(0, str(default_value))
+
+        # Following labels and entry boxes will be written a row below
+        row_num += 1
+
+    # Spacing at the end of the section with empty labels
+    spacer = tk.Label(delay_parameters_frame, text="")  # An empty label
+    spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
+
+
+
+
+    ############################### Frame for lockin ###############################
+    # Repeat for lockin parameters
+    lockin_parameters_frame = tk.Frame(Initialization_screen)
+    lockin_parameters_frame.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+
+    row_num = 0
+    label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    row_num += 1
+
+    # Add labels in succession
+    for parameter, default_value in default_values_lockin.items():
+
+        # For every parameter the user will input add a short description with a label 
+        label = tk.Label(lockin_parameters_frame, text=parameter, anchor="w")
+        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+
+        # Add an entry box for the user to write a parameter on the cell and place it to the right
+        entry = tk.Entry(lockin_parameters_frame)
+        entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+
+        # Fill entry box with the default value
+        entry.insert(0, str(default_value))
+
+        # Following labels and entry boxes will be written a row below
+        row_num += 1
+    
+    # This button initializes the devices prior to running the experiment
+    button = tk.Button(Initialization_screen, text="Initialize devices", command=initialize_button)
+    button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+
+
+
+    ################################### Experiment Screen #########################
+    # This screen holds the parameters to configure the experiment and visualize it
+    Experiment_screen = tk.Frame(main_window)
+    Screens["Experiment screen"] = Experiment_screen
+
+    label = tk.Label(Experiment_screen, text="Enter device experiment parameters", anchor="w")
+    row_num = 0
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+
+    # Drop down menu to select different screens
+    menu_var = tk.StringVar(value="Initialization screen")  # Default value
+    screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen)
+    screen_menu.pack(side="top", anchor="w", padx=0, pady=0)
+
+    # Add a horizontal line (separator) below the dropdown menu
+    separator = ttk.Separator(main_window, orient="horizontal")
+    separator.pack(fill="x", padx=0, pady=0)  # Fill horizontally, with padding
+
+
+
+
+
+    # Call the main window to draw the GUI
+    show_screen("Initialization screen")    # Run first to show default screen when loading
+    main_window.mainloop()
+
+
+
+
+
+
+############################### Divide program in threads ###############################
+# If we try to run the core logic functions to manage the experiment along the GUI 
+# functions we won't be able to do it simultaneously unless we divide them into threads
+
+initialization_thread = threading.Thread(
+    target=core_logic.initialization_dummy, # Only pass the reference to the function without "()"
+    args=(),
+    kwargs={"Troubleshooting": False}       # We should pass the arguments for later use 
+)
+
+experiment_thread = threading.Thread(
+    target=core_logic.perform_experiment_dummy,
+    args=(),
+    kwargs={"Troubleshooting": False}
+)
+
+GUI_thread = threading.Thread(target=GUI)
+
+# Start the main window thread to draw the GUI
+GUI_thread.start()
+GUI_thread.join()
+initialization_thread.join()
+#experiment_thread.join()
+
 
 
 '''
@@ -116,8 +203,7 @@ def on_submit():
     user_input = entry.get()
     label.config(text=f"You entered: {user_input}")
 
-button = tk.Button(root, text="Submit", command=on_submit)
+button = tk.Button(main_window, text="Submit", command=on_submit)
 button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 '''
-# Run the main loop
-root.mainloop()
+

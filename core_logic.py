@@ -19,12 +19,24 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
 import math
-import Measurement_Automatization_Functions as MAfun
+import core_logic_functions as clfun
 
 
 
+# REMOVE LATER!
+# Dummy functios to test development on machines that are not connected to experiment devices
+def initialization_dummy(Troubleshooting):
+    print("Start initializaiton")
+    for task in range(1, 6):
+        time.sleep(1)
+        print(f"Task {task} completed")
 
 
+def perform_experiment_dummy(Troubleshooting):
+    print("Start Experiment")
+    for task in range(1, 6):
+        time.sleep(1)
+        print(f"Task {task} completed")
 
 ####################################### MAIN CODE #######################################
 
@@ -65,7 +77,7 @@ def initialization(Troubleshooting):
         # the return is non 0. The program will stop, throwing it to terminal in 
         # case any of their outputs correlate with an internal error
         if result != 0:
-            raise Exception(f"     TLI_BuildDeviceList failed: {MAfun.get_error_description(result)}")
+            raise Exception(f"     TLI_BuildDeviceList failed: {clfun.get_error_description(result)}")
         elif Troubleshooting:
             print(f"     TLI_BuildDeviceList passed without raising errors")
         
@@ -77,7 +89,7 @@ def initialization(Troubleshooting):
     # Look at the list of connected devices and actually check whether our particular stage is there
 
     # Get the list of all BBD301 devices (their device's ID is 103)
-    device_list = MAfun.get_device_list_by_type(lib, device_type=103)
+    device_list = clfun.get_device_list_by_type(lib, device_type=103)
 
     if "103391384" in device_list:
         print(f"    Succesfuly found delay stage in device list")
@@ -92,7 +104,7 @@ def initialization(Troubleshooting):
     result = lib.BMC_Open(serial_num)
     time.sleep(1)
     if result != 0:
-        raise Exception(f"     BMC_Open failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_Open failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"    BMC_Open passed without raising errors")
     
@@ -116,7 +128,7 @@ def initialization(Troubleshooting):
     result = lib.BMC_EnableChannel(serial_num, channel)
     time.sleep(1)
     if result != 0:
-        raise Exception(f"     BMC_EnableChannel failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_EnableChannel failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"     BMC_EnableChannel passed without raising erros, enabled channel: {channel.value}")
     
@@ -127,7 +139,7 @@ def initialization(Troubleshooting):
     result = lib.BMC_StartPolling(serial_num, c_int(200))
     time.sleep(3)
     if result != 0:
-        raise Exception(f"     BMC_StartPolling failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_StartPolling failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"    BMC_StartPolling passed without raising errors")
 
@@ -137,7 +149,7 @@ def initialization(Troubleshooting):
     can_move_without_homing_flag = c_bool()
     result = lib.BMC_CanMoveWithoutHomingFirst(byref(can_move_without_homing_flag)) # byref(variable) is a C pointer to that variable
     if result != 0:
-        raise Exception(f"     BMC_CanMoveWithoutHomingFirst failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_CanMoveWithoutHomingFirst failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"    BMC_CanMoveWithoutHomingFirst passed without raising errors")
     
@@ -149,7 +161,7 @@ def initialization(Troubleshooting):
         # Clear messaging que so that we can listen to the device for it's "finished homing" message
         result = lib.BMC_ClearMessageQueue(serial_num, channel)
         if result != 0:
-            raise Exception(f"     BMC_ClearMessageQueue failed: {MAfun.get_error_description(result)}")
+            raise Exception(f"     BMC_ClearMessageQueue failed: {clfun.get_error_description(result)}")
         elif Troubleshooting:
             print(f"    BMC_ClearMessageQueue passed without raising errors")
 
@@ -157,7 +169,7 @@ def initialization(Troubleshooting):
         result = lib.BMC_Home(serial_num, channel)
         time.sleep(1)
         if result != 0:
-            raise Exception(f"     BMC_Home failed: {MAfun.get_error_description(result)}")
+            raise Exception(f"     BMC_Home failed: {clfun.get_error_description(result)}")
         elif Troubleshooting:
             print(f"    BMC_Home passed without raising errors")
         print(f"    Homing now")
@@ -195,7 +207,7 @@ def initialization(Troubleshooting):
                                                 c_int(1)) # Pass int 1 to convert to device velocity units
     
     if result != 0:
-        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
@@ -205,13 +217,13 @@ def initialization(Troubleshooting):
                                     byref(acceleration_dev), 
                                     c_int(2)) # Pass int 2 to convert to device acceleration units
     if result != 0:
-        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")                                
 
     result = lib.BMC_SetVelParams(serial_num, channel, acceleration_dev, max_velocity_dev)
     if result != 0:
-        raise Exception(f"     BMC_SetVelParams failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_SetVelParams failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"    BMC_SetVelParams passed without raising errors")
 
@@ -223,7 +235,7 @@ def initialization(Troubleshooting):
     max_velocity_dev = c_int()
     result = lib.BMC_GetVelParams(serial_num, channel, byref(acceleration_dev),  byref(max_velocity_dev))
     if result != 0:
-        raise Exception(f"     BMC_GetVelParams failed: {MAfun.get_error_description(result)}")
+        raise Exception(f"     BMC_GetVelParams failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
         print(f"    BMC_GetVelParams passed without raising errors")
 
@@ -255,7 +267,7 @@ def initialization(Troubleshooting):
     lockin_USB_port = "COM5"
     global adapter
     try:
-        adapter = MAfun.initialize_connection(port=lockin_USB_port, baudrate=115200, timeout=1)
+        adapter = clfun.initialize_connection(port=lockin_USB_port, baudrate=115200, timeout=1)
 
     except Exception as e:
         print(f"Error{e}\nTroubleshooting:\n    1) Try to disconnect and recconnect the lockin USB then retry\n    2) If the problem persists verify that lockin is connected at {lockin_USB_port} on Windows device manager, if not change to correct port")
@@ -264,7 +276,7 @@ def initialization(Troubleshooting):
     print(f"    Configuring lockin amplifier")
 
     try:
-        MAfun.configure_lockin(adapter)  
+        clfun.configure_lockin(adapter)  
     except Exception as e:
         print(f"    Error while configuring lockin amplifier {e}") 
 
@@ -325,7 +337,7 @@ def perform_experiment(Troubleshooting):
                     print("\n")
 
                     # Time between singal change and lockin's LP settling, I need it here to estimate experiment duration 
-                    time_constant = MAfun.request_time_constant(adapter)
+                    time_constant = clfun.request_time_constant(adapter)
                     settling_time = 5*time_constant
                     average_step_duration_sec = 0.5 + settling_time
                     num_steps = math.ceil( (end_position - start_position) / step_size )
@@ -348,7 +360,7 @@ def perform_experiment(Troubleshooting):
                 while not parameter_is_valid:
                     experiment_title = input("    Please introduce title for experiment (avoid using special characters): ")
                     
-                    if(MAfun.is_valid_file_name(experiment_title)):
+                    if(clfun.is_valid_file_name(experiment_title)):
                         parameter_is_valid = True
                     
                     else:
@@ -393,20 +405,20 @@ def perform_experiment(Troubleshooting):
 
                 ########################### Scan and Measure at list of positions ###########################
                 
-                MAfun.autorange(adapter)
-                MAfun.set_sensitivity(adapter, MAfun.find_next_sensitivity(adapter))
+                clfun.autorange(adapter)
+                clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
 
                 for index in range(0, len(Positions)):
 
                     
                     print(f"    Measurement at step: {index+1} of {len(Positions)}")
-                    MAfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
+                    clfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
                     
                     print(f"    Awaiting for filter settling")
                     time.sleep(settling_time)                                                   # Settle
                     
                     print(f"    Capturing data")
-                    Data[index] = MAfun.request_R(adapter)                                      # Capture
+                    Data[index] = clfun.request_R(adapter)                                      # Capture
                     print("\n")
 
                 print(f"    Experiment is finished\n")                
@@ -447,7 +459,7 @@ def perform_experiment(Troubleshooting):
                 CSV_file_title = experiment_title + ".csv"
 
                 # Create a string storing relevant experiment data
-                experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {time_constant}s,Filter slope: {MAfun.request_filter_slope(adapter)}dB/Oct,Input range: {MAfun.request_range(adapter)}V")
+                experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}V")
 
                 # Write the parameters and data to a CSV file
                 with open(CSV_file_title, "w") as file:
@@ -477,13 +489,13 @@ def perform_experiment(Troubleshooting):
             result = lib.BMC_Close(serial_num)
             time.sleep(1)
             if result != 0:
-                raise Exception(f"BMC_Close failed: {MAfun.get_error_description(result)}")
+                raise Exception(f"BMC_Close failed: {clfun.get_error_description(result)}")
             elif Troubleshooting:
                 print(f"BMC_Close passed without raising errors")
             
             print(f"Succesfully closed communications to Delay Stage")
 
-            MAfun.close_connection(adapter)
+            clfun.close_connection(adapter)
             print("Succesfully closed connection to lockin")
             
 
