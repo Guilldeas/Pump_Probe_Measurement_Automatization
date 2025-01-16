@@ -1,8 +1,12 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import Toplevel
 import json
 import core_logic
 import threading
+import sys
+from queue import Queue
+
 
 
 def show_screen(screen_name):
@@ -17,10 +21,79 @@ def show_screen(screen_name):
     Screens[screen_name].pack(fill="both", expand=True)
 
 
-# BUG: Calling this more than once before the thread is joined will throw an error!
-# Solve with callback?
+# Function to redirect stdout to a Queue
+class OutputRedirector:
+    def __init__(self, queue):
+        self.queue = queue
+
+    def write(self, message):
+        if message.strip():  # Avoid empty lines
+            self.queue.put(message)
+
+    def flush(self):
+        pass  # Required for compatibility
+
+
+def capture_stdout(queue):
+    """
+    Redirects stdout to the provided Queue.
+    """
+    sys.stdout = OutputRedirector(queue)
+
+
+def restore_stdout():
+    """
+    Restores the original stdout.
+    """
+    sys.stdout = sys.__stdout__
+
+
 def initialize_button():
+    def initialization_thread_logic():
+        # Dummy initialization function to simulate core logic
+        core_logic.initialization(Troubleshooting=False)
+        restore_stdout()
+
+    # Create the waiting window
+    waiting_window = Toplevel(main_window)
+    waiting_window.title("Initializing Devices")
+    waiting_window.geometry("400x300")
+    waiting_window.resizable(False, False)
+    waiting_window.grab_set()  # Make it modal (blocks interaction with other windows)
+
+    # Add a label to inform the user
+    label = tk.Label(waiting_window, text="Please wait while the devices are initialized...")
+    label.pack(pady=20)
+
+    # Queue for communication between threads
+    output_queue = Queue()
+
+    # Redirect stdout to the queue
+    capture_stdout(output_queue)
+
+    # Run initialization on a different thread
+    initialization_thread = threading.Thread(target=initialization_thread_logic)
     initialization_thread.start()
+
+    # Function to check for updates from the queue
+    def check_for_updates():
+        while not output_queue.empty():
+            # Update the label with new text from the queue
+            new_message = output_queue.get()
+            label.config(text=new_message)
+
+        if initialization_thread.is_alive():
+            # Schedule this function to run again after 100ms
+            waiting_window.after(100, check_for_updates)
+        else:
+            # Clean up after the thread is done
+            initialization_thread.join()
+            waiting_window.destroy()
+
+    # Start checking for updates
+    check_for_updates()
+
+
 
 def GUI():
     # Extract default configuration values for both devices from the configuration file
@@ -34,6 +107,7 @@ def GUI():
 
     ############################### Start drawing GUI ###############################
     # Create the main window
+    global main_window
     main_window = tk.Tk()
     main_window.title("Automatic Pump Probe")
     main_window.geometry("1024x768")
@@ -175,11 +249,7 @@ def GUI():
 # If we try to run the core logic functions to manage the experiment along the GUI 
 # functions we won't be able to do it simultaneously unless we divide them into threads
 
-initialization_thread = threading.Thread(
-    target=core_logic.initialization_dummy, # Only pass the reference to the function without "()"
-    args=(),
-    kwargs={"Troubleshooting": False}       # We should pass the arguments for later use 
-)
+
 
 experiment_thread = threading.Thread(
     target=core_logic.perform_experiment_dummy,
@@ -192,7 +262,6 @@ GUI_thread = threading.Thread(target=GUI)
 # Start the main window thread to draw the GUI
 GUI_thread.start()
 GUI_thread.join()
-initialization_thread.join()
 #experiment_thread.join()
 
 
