@@ -243,10 +243,10 @@ def initialize_connection(port="COM5", baudrate=115200, timeout=1):
     try:
         adapter = SerialAdapter(port=port, baudrate=baudrate, timeout=timeout)
         adapter.connection.reset_input_buffer()
-        print("RS232 communication initialized successfully with PyMeasure.")
+        print(f"    RS232 communication initialized successfully")
         return adapter
     except Exception as e:
-        print(f"Error initializing connection: {e}")
+        print(f"    Error initializing connection: {e}")
         return None
 
 
@@ -281,7 +281,7 @@ def set_sensitivity(adapter, sensitivity):
 
     # If sensitivity not found, raise an error
     if index is None:
-        raise ValueError(f"Tried to set sensitivity to invalid value: {sensitivity} V. "
+        raise ValueError(f"Error: Tried to set sensitivity to invalid value: {sensitivity} V. "
                          f"Valid sensitivities are: {list(sensitivity_table.values())}")
 
     # Send the SCAL command with the selected index
@@ -289,7 +289,7 @@ def set_sensitivity(adapter, sensitivity):
         command = f"SCAL {index}\n"
         adapter.write(command)
         time.sleep(0.1)  # Small delay to ensure the instrument processes the command
-        print(f"Sensitivity set to {sensitivity} V (Index {index}).")
+        print(f"    Sensitivity set to {sensitivity} V (Index {index}).")
     except Exception as e:
         print(f"Error setting sensitivity: {e}")
 
@@ -323,7 +323,7 @@ def set_time_constant(adapter, time_constant):
 
     # If time constant not found, raise an error
     if index is None:
-        raise ValueError(f"Invalid time constant: {time_constant} s. "
+        raise ValueError(f"Error: Invalid time constant: {time_constant} s. "
                          f"Valid time constants are: {list(time_constant_table.values())}")
 
     # Send the OFLT command with the selected index
@@ -331,7 +331,7 @@ def set_time_constant(adapter, time_constant):
         command = f"OFLT {index}\n"
         adapter.write(command)
         time.sleep(0.1)  # Small delay to ensure the instrument processes the command
-        print(f"Time constant set to {time_constant} s (Index {index}).")
+        print(f"    Time constant set to {time_constant} s (Index {index}).")
     except Exception as e:
         print(f"Error setting time constant: {e}")
 
@@ -367,9 +367,9 @@ def configure_lockin(adapter):
         adapter.write("HARM?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 1:
-            print("Configured lockin to read 1st harmonic")
+            print(f"    Configured lockin to read 1st harmonic")
         else:
-            print("Unable to configure lockin to read 1st harmonic")
+            print("Error: Unable to configure lockin to read 1st harmonic")
 
 
         #------ Configure lockin to external reference ------
@@ -380,9 +380,9 @@ def configure_lockin(adapter):
         adapter.write("RSRC?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 1:
-            print("Configured lockin to external reference")
+            print(f"    Configured lockin to external reference")
         else:
-            print("Unable to configure lockin to external reference")
+            print("Error: Unable to configure lockin to external reference")
 
 
         #------ Configure lockin to external reference positive TTL ------
@@ -393,9 +393,9 @@ def configure_lockin(adapter):
         adapter.write("RTRG?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 1:
-            print("Configured lockin to trigger reference at positive TTL")
+            print(f"    Configured lockin to trigger reference at positive TTL")
         else:
-            print("Unable to configure lockin to trigger reference at positive TTL")
+            print("Error: Unable to configure lockin to trigger reference at positive TTL")
 
 
         #------ Configure lockin to external reference positive TTL ------
@@ -408,9 +408,9 @@ def configure_lockin(adapter):
         adapter.write("REFZ?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 0:
-            print("Configured lockin to 50 Ohm input reference")
+            print(f"    Configured lockin to 50 Ohm input reference")
         else:
-            print("Unable to configure lockin to 50 Ohm input reference")
+            print("Error: Unable to configure lockin to 50 Ohm input reference")
 
 
         #------ Configure lockin to read a voltage signal ------
@@ -421,9 +421,9 @@ def configure_lockin(adapter):
         adapter.write("IVMD?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 0:
-            print("Configured lockin to read input voltage")
+            print(f"    Configured lockin to read input voltage")
         else:
-            print("Unable to configure lockin to read input voltage")
+            print("Error: Unable to configure lockin to read input voltage")
 
 
         #------ Configure lockin to read common voltage input ------
@@ -434,9 +434,9 @@ def configure_lockin(adapter):
         adapter.write("ISRC?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 0:
-            print("Configured lockin to read common voltage input")
+            print(f"    Configured lockin to read common voltage input")
         else:
-            print("Unable to configure lockin to read common voltage input")
+            print("Error: Unable to configure lockin to read common voltage input")
 
         
 
@@ -501,9 +501,9 @@ def request_range(adapter):
         # Convert the response to an integer index
         range_index = int(response)
         if range_index in range_table:
-            return f"Current Voltage Range: {range_table[range_index]}"
+            return f"    Current Voltage Range: {range_table[range_index]}"
         else:
-            return f"Unexpected range index received: {range_index}"
+            return f"Error: Unexpected range index received: {range_index}"
 
     except Exception as e:
         print(f"Error requesting voltage range: {e}")
@@ -637,7 +637,7 @@ def find_next_sensitivity(adapter):
             return None
 
         current_range = input_range_table[current_range_index]
-        print(f"Current Input Range: {current_range} (Index {current_range_index})")
+        print(f"    Current Input Range: {current_range} (Index {current_range_index})")
 
         # Step 2: Find the sensitivity above the current range
         range_voltage_map = {
@@ -659,7 +659,7 @@ def find_next_sensitivity(adapter):
                 break
 
         if next_sensitivity:
-            print(f"Next Sensitivity: {next_sensitivity} V")
+            print(f"    Next Sensitivity: {next_sensitivity} V")
             return next_sensitivity
         else:
             print("No sensitivity found above the current input range.")
@@ -678,4 +678,4 @@ def close_connection(adapter):
     """
     if adapter and adapter.connection.is_open:
         adapter.connection.close()
-        print("Serial port closed successfully.")
+        print(f"    Serial port closed successfully.")

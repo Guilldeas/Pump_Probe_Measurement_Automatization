@@ -6,6 +6,7 @@ import core_logic
 import threading
 import sys
 from queue import Queue
+from functools import partial
 
 
 
@@ -21,7 +22,11 @@ def show_screen(screen_name):
     Screens[screen_name].pack(fill="both", expand=True)
 
 
-# Function to redirect stdout to a Queue
+def close_window(window):
+    window.destroy()
+
+
+# Function to redirect stdout and stderr to a Queue
 class OutputRedirector:
     def __init__(self, queue):
         self.queue = queue
@@ -33,43 +38,56 @@ class OutputRedirector:
     def flush(self):
         pass  # Required for compatibility
 
-
-def capture_stdout(queue):
+def capture_output(queue):
     """
-    Redirects stdout to the provided Queue.
+    Redirect both stdout and stderr to the provided Queue.
     """
     sys.stdout = OutputRedirector(queue)
+    sys.stderr = OutputRedirector(queue)  # Capture exceptions
 
-
-def restore_stdout():
+def restore_output():
     """
-    Restores the original stdout.
+    Restores the original stdout and stderr.
     """
     sys.stdout = sys.__stdout__
-
+    sys.stderr = sys.__stderr__
 
 def initialize_button():
     def initialization_thread_logic():
-        # Dummy initialization function to simulate core logic
-        core_logic.initialization(Troubleshooting=False)
-        restore_stdout()
+        
+        # Catch exceptions while initializing and display them
+        # later to user to aid troubleshooting 
+        try:
+            core_logic.initialization(Troubleshooting=False)
+        except Exception as e:
+            print(f"Error: {e}")  # Will be captured and displayed in GUI
+        finally:
+            restore_output()
 
     # Create the waiting window
     waiting_window = Toplevel(main_window)
     waiting_window.title("Initializing Devices")
-    waiting_window.geometry("400x300")
-    waiting_window.resizable(False, False)
+    waiting_window.geometry("800x300")
+    waiting_window.resizable(True, True)
     waiting_window.grab_set()  # Make it modal (blocks interaction with other windows)
+
+    # Create a Listbox to display initialization messages
+    listbox = tk.Listbox(waiting_window, selectmode=tk.SINGLE, height=15)
+    listbox.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+    scrollbar = tk.Scrollbar(waiting_window, orient=tk.VERTICAL)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    listbox.config(yscrollcommand=scrollbar.set)
+    scrollbar.config(command=listbox.yview)
 
     # Add a label to inform the user
     label = tk.Label(waiting_window, text="Please wait while the devices are initialized...")
-    label.pack(pady=20)
+    label.pack(pady=20, padx=20)
 
     # Queue for communication between threads
     output_queue = Queue()
 
-    # Redirect stdout to the queue
-    capture_stdout(output_queue)
+    # Redirect stdout and stderr to the queue
+    capture_output(output_queue)
 
     # Run initialization on a different thread
     initialization_thread = threading.Thread(target=initialization_thread_logic)
@@ -78,20 +96,23 @@ def initialize_button():
     # Function to check for updates from the queue
     def check_for_updates():
         while not output_queue.empty():
-            # Update the label with new text from the queue
             new_message = output_queue.get()
-            label.config(text=new_message)
+            listbox.insert(tk.END, new_message)
+            listbox.see(tk.END)  # Auto-scroll to the bottom
 
         if initialization_thread.is_alive():
-            # Schedule this function to run again after 100ms
             waiting_window.after(100, check_for_updates)
         else:
-            # Clean up after the thread is done
             initialization_thread.join()
-            waiting_window.destroy()
+            label.config(text="Initialization Complete")
+
+            # Add button to close window
+            button = tk.Button(waiting_window, text="Ok", command=partial(close_window, waiting_window))
+            button.pack(side="bottom", padx=20, pady=20)
 
     # Start checking for updates
     check_for_updates()
+
 
 
 

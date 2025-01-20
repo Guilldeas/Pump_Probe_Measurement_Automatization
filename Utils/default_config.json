@@ -8,6 +8,6 @@
     "Lockin Default Config Params": {
         "USBPort": "COM5",
         "BaudRate": 115200,
-        "TimeoutSeconds": 5
+        "TimeoutSeconds": 1
     }
 }

@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
 import math
+import json
 import core_logic_functions as clfun
 
 
@@ -56,14 +57,23 @@ def initialization(Troubleshooting):
     global lib 
     lib = cdll.LoadLibrary("Thorlabs.MotionControl.Benchtop.BrushlessMotor.dll")
 
+    # Extract default configuration values for both devices from the configuration file
+    with open('Utils\default_config.json', "r") as json_file:
+        default_config = json.load(json_file)
+
+    default_values_delay_stage = default_config["Delay Stage Default Config Params"]
+    default_values_lockin = default_config["Lockin Default Config Params"]
+
+    serial_num_str = default_values_delay_stage["SerialNumber"]
+    channel_int = default_values_delay_stage["Channel"]
 
     # Set constants with appropiate C type so that we can later pass them appropiately to the C DLL funcitons, 
     # serial number for the BBD301 delay stage driver can be read when loading the Kinesis software, 
     # channel number is 1 because the BBD301 can only support one delay stage (I think).
     global serial_num
-    serial_num = c_char_p(b"103391384")
+    serial_num = c_char_p(serial_num_str.encode('utf-8')) # We use encode to pass it as bytes
     global channel
-    channel = c_short(1)
+    channel = c_short(channel_int)
 
 
     # Use a try loop to catch exceptions when loading risky functions that might fail
@@ -194,8 +204,8 @@ def initialization(Troubleshooting):
     # The machine will catch this self destruction attempt and stop itself abruptly (without throwing any
     # errors mind you). So we need to manually input some safe parameters when loading.
     # Don't trust their repo, don't trust their C_API docs, verify anything and everything.           
-    acceleration_real = c_double(900.0) # in mm/s^2
-    max_velocity_real = c_double(45.0) # in mm/s
+    acceleration_real = c_double(default_values_delay_stage["Acceleration_mm_per_s2"]) # in mm/s^2
+    max_velocity_real = c_double(default_values_delay_stage["MaxVelocity_mm_per_s"]) # in mm/s
 
     # We convert them to device units
     acceleration_dev = c_int()
@@ -264,10 +274,12 @@ def initialization(Troubleshooting):
     
     print(f"Configuring Lockin Amplifier:")
     print(f"    Attempting to connect to Lockin Amplifer")
-    lockin_USB_port = "COM5"
+    lockin_USB_port = default_values_lockin["USBPort"]
+    baud_rate = default_values_lockin["BaudRate"]
+    time_out = default_values_lockin["TimeoutSeconds"]
     global adapter
     try:
-        adapter = clfun.initialize_connection(port=lockin_USB_port, baudrate=115200, timeout=1)
+        adapter = clfun.initialize_connection(port=lockin_USB_port, baudrate=baud_rate, timeout=time_out)
 
     except Exception as e:
         print(f"Error{e}\nTroubleshooting:\n    1) Try to disconnect and recconnect the lockin USB then retry\n    2) If the problem persists verify that lockin is connected at {lockin_USB_port} on Windows device manager, if not change to correct port")
