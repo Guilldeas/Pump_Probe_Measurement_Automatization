@@ -20,10 +20,10 @@ def get_device_list_by_type(lib, device_type=0):
     # Call TLI_GetDeviceListByTypeExt
     result = lib.TLI_GetDeviceListByTypeExt(receiveBuffer, buffer_size, device_type)
     if result != 0:
-        print(f"     Unable to connect to Delay Stage")
-        raise Exception(f"     TLI_GetDeviceListByTypeExt failed with error code: {result}")
+        print(f"    · Unable to connect to Delay Stage")
+        raise Exception(f"    · TLI_GetDeviceListByTypeExt failed with error code: {result}")
     elif Troubleshooting:
-            print(f"     TLI_GetDeviceListByTypeExt passed without raising errors")
+            print(f"    · TLI_GetDeviceListByTypeExt passed without raising errors")
 
     # Decode and parse the comma-separated serial numbers
     device_list = receiveBuffer.value.decode("utf-8").split(",")
@@ -106,7 +106,7 @@ def evaluate_status_bits(serial_num, channel, lib):
     status_bits.value = lib.BMC_GetStatusBits(serial_num, channel)
 
     # Print the raw status bits
-    print(f"     Raw status bits: {bin(status_bits.value)}")
+    print(f"    · Raw status bits: {bin(status_bits.value)}")
 
     # Iterate over each bitmask in the dictionary
     for bitmask, (description_0, description_1) in status_bit_descriptions.items():
@@ -121,7 +121,7 @@ def move_to_position(lib, serial_num, channel, position):
 
     # Set a new position in real units [mm]
     if Troubleshooting:
-        print(f"     New position: {position}mm")
+        print(f"    · New position: {position}mm")
 
     # Convert to device units
     new_pos_real = c_double(position)  # in real units
@@ -133,20 +133,20 @@ def move_to_position(lib, serial_num, channel, position):
                                                 c_int(0)) # Pass int 0 on last input to choose distance units
 
     if result != 0:
-        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
+        raise Exception(f"    · BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
     elif Troubleshooting:
-            print(f"     BMC_GetDeviceUnitFromRealValue passed without raising errors")
+            print(f"    · BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
-    print(f"     Moving to: {new_pos_real.value} [mm]")
+    print(f"    · Moving to: {new_pos_real.value} [mm]")
     if Troubleshooting:
-        print(f"     That position in device units is: {new_pos_dev.value} [dev units]")
+        print(f"    · That position in device units is: {new_pos_dev.value} [dev units]")
 
     # Clear messaging que so that we can listen to the device for it's "finished moving" message
     result = lib.BMC_ClearMessageQueue(serial_num, channel)
     if result != 0:
-        raise Exception(f"     BMC_ClearMessageQueue failed: {get_error_description(result)}")
+        raise Exception(f"    · BMC_ClearMessageQueue failed: {get_error_description(result)}")
     elif Troubleshooting:
-        print(f"     BMC_ClearMessageQueue passed without raising errors")
+        print(f"    · BMC_ClearMessageQueue passed without raising errors")
 
     # Feed the position now converted to device units to the device
 
@@ -154,9 +154,9 @@ def move_to_position(lib, serial_num, channel, position):
     time.sleep(1)
     result = lib.BMC_MoveToPosition(serial_num, channel, new_pos_dev)
     if result != 0:
-        raise Exception(f"     BMC_MoveToPosition failed: {get_error_description(result)}")
+        raise Exception(f"    · BMC_MoveToPosition failed: {get_error_description(result)}")
     elif Troubleshooting:
-        print(f"     BMC_MoveToPosition passed without raising errors")    
+        print(f"    · BMC_MoveToPosition passed without raising errors")    
     time.sleep(1)
 
     
@@ -164,7 +164,7 @@ def move_to_position(lib, serial_num, channel, position):
 
     # Wait until we receive message that movement has finished
     if Troubleshooting:
-        print(f"     Awaiting stop moving message")
+        print(f"    · Awaiting stop moving message")
     # Reset variables (they are on a passing state from previous loop)
     message_type = c_ushort()  # WORD
     message_id = c_ushort()    # WORD
@@ -182,15 +182,15 @@ def move_to_position(lib, serial_num, channel, position):
     # (both polling and this funciton will suppousedly prompt the device to evaluate it)
     result = lib.BMC_RequestPosition(serial_num, channel)
     if result != 0:
-        raise Exception(f"     BMC_RequestPosition failed: {get_error_description(result)}")
+        raise Exception(f"    · BMC_RequestPosition failed: {get_error_description(result)}")
     elif Troubleshooting:
-        print(f"     BMC_RequestPosition passed without raising errors")
+        print(f"    · BMC_RequestPosition passed without raising errors")
     time.sleep(0.2)
 
     # Get the last known position from the device in "Device units"
     dev_pos = c_int(lib.BMC_GetPosition(serial_num, channel))
     if Troubleshooting:
-        print(f"     Device position in dev units: {dev_pos.value}")
+        print(f"    · Device position in dev units: {dev_pos.value}")
 
     # Convert position from device units to real units
     real_pos = c_double()
@@ -243,10 +243,10 @@ def initialize_connection(port="COM5", baudrate=115200, timeout=1):
     try:
         adapter = SerialAdapter(port=port, baudrate=baudrate, timeout=timeout)
         adapter.connection.reset_input_buffer()
-        print(f"    RS232 communication initialized successfully")
+        print(f"    ·RS232 communication initialized successfully")
         return adapter
     except Exception as e:
-        print(f"    Error initializing connection: {e}")
+        print(f"    ·Error initializing connection: {e}")
         return None
 
 
@@ -289,7 +289,7 @@ def set_sensitivity(adapter, sensitivity):
         command = f"SCAL {index}\n"
         adapter.write(command)
         time.sleep(0.1)  # Small delay to ensure the instrument processes the command
-        print(f"    Sensitivity set to {sensitivity} V (Index {index}).")
+        print(f"    ·Sensitivity set to {sensitivity} V (Index {index}).")
     except Exception as e:
         print(f"Error setting sensitivity: {e}")
 
@@ -331,7 +331,7 @@ def set_time_constant(adapter, time_constant):
         command = f"OFLT {index}\n"
         adapter.write(command)
         time.sleep(0.1)  # Small delay to ensure the instrument processes the command
-        print(f"    Time constant set to {time_constant} s (Index {index}).")
+        print(f"    ·Time constant set to {time_constant} s (Index {index}).")
     except Exception as e:
         print(f"Error setting time constant: {e}")
 
@@ -347,14 +347,14 @@ def configure_lockin(adapter):
         #------ Clear status registers ------
         adapter.write("*CLS\n")  # Clear status registers
         time.sleep(0.1)
-        print("Lock-in amplifier status cleared.")
+        print(f"    ·Lock-in amplifier status cleared.")
 
 
         #------ Check communication readiness ------
         adapter.write("*IDN?\n")  # Query instrument identification (optional for SR860)
         response = adapter.read().strip()
         if response:
-            print(f"Instrument ID: {response}")
+            print(f"    ·Instrument ID: {response}")
         else:
             print("Warning: *IDN? command returned no response. Continuing anyway.")
         
@@ -367,7 +367,7 @@ def configure_lockin(adapter):
         adapter.write("HARM?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 1:
-            print(f"    Configured lockin to read 1st harmonic")
+            print(f"    ·Configured lockin to read 1st harmonic")
         else:
             print("Error: Unable to configure lockin to read 1st harmonic")
 
@@ -380,7 +380,7 @@ def configure_lockin(adapter):
         adapter.write("RSRC?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 1:
-            print(f"    Configured lockin to external reference")
+            print(f"    ·Configured lockin to external reference")
         else:
             print("Error: Unable to configure lockin to external reference")
 
@@ -393,7 +393,7 @@ def configure_lockin(adapter):
         adapter.write("RTRG?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 1:
-            print(f"    Configured lockin to trigger reference at positive TTL")
+            print(f"    ·Configured lockin to trigger reference at positive TTL")
         else:
             print("Error: Unable to configure lockin to trigger reference at positive TTL")
 
@@ -408,7 +408,7 @@ def configure_lockin(adapter):
         adapter.write("REFZ?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 0:
-            print(f"    Configured lockin to 50 Ohm input reference")
+            print(f"    ·Configured lockin to 50 Ohm input reference")
         else:
             print("Error: Unable to configure lockin to 50 Ohm input reference")
 
@@ -421,7 +421,7 @@ def configure_lockin(adapter):
         adapter.write("IVMD?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 0:
-            print(f"    Configured lockin to read input voltage")
+            print(f"    ·Configured lockin to read input voltage")
         else:
             print("Error: Unable to configure lockin to read input voltage")
 
@@ -434,7 +434,7 @@ def configure_lockin(adapter):
         adapter.write("ISRC?\n")
         time.sleep(0.1)
         if int(adapter.read().strip()) == 0:
-            print(f"    Configured lockin to read common voltage input")
+            print(f"    ·Configured lockin to read common voltage input")
         else:
             print("Error: Unable to configure lockin to read common voltage input")
 
@@ -501,7 +501,7 @@ def request_range(adapter):
         # Convert the response to an integer index
         range_index = int(response)
         if range_index in range_table:
-            return f"    Current Voltage Range: {range_table[range_index]}"
+            return f"    ·Current Voltage Range: {range_table[range_index]}"
         else:
             return f"Error: Unexpected range index received: {range_index}"
 
@@ -637,7 +637,7 @@ def find_next_sensitivity(adapter):
             return None
 
         current_range = input_range_table[current_range_index]
-        print(f"    Current Input Range: {current_range} (Index {current_range_index})")
+        print(f"    ·Current Input Range: {current_range} (Index {current_range_index})")
 
         # Step 2: Find the sensitivity above the current range
         range_voltage_map = {
@@ -659,7 +659,7 @@ def find_next_sensitivity(adapter):
                 break
 
         if next_sensitivity:
-            print(f"    Next Sensitivity: {next_sensitivity} V")
+            print(f"    ·Next Sensitivity: {next_sensitivity} V")
             return next_sensitivity
         else:
             print("No sensitivity found above the current input range.")
@@ -678,4 +678,4 @@ def close_connection(adapter):
     """
     if adapter and adapter.connection.is_open:
         adapter.connection.close()
-        print(f"    Serial port closed successfully.")
+        print(f"    ·Serial port closed successfully.")

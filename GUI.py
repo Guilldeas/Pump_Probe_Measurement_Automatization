@@ -58,7 +58,8 @@ def initialize_button():
         # Catch exceptions while initializing and display them
         # later to user to aid troubleshooting 
         try:
-            core_logic.initialization(Troubleshooting=False)
+            #core_logic.initialization(Troubleshooting=False)
+            core_logic.initialization_dummy(Troubleshooting=False)
         except Exception as e:
             print(f"Error: {e}")  # Will be captured and displayed in GUI
         finally:
@@ -114,6 +115,24 @@ def initialize_button():
     check_for_updates()
 
 
+def load_parameters(experiment_preset, Entries):
+    # Update parameters loaded from json into screen to
+    # new parameters on screen. We assume 
+    index = 0
+    for key, _ in experiment_preset.items():
+
+        # Entries are read with get and written into the dict
+        experiment_preset[key] = Entries[index].get()
+        index = index + 1
+
+    # Check whether variables are safe if not safe break before saving
+
+    # Write them into the json
+    with open('Utils\experiment_preset.json', "w") as json_file:
+        json.dump(experiment_preset, json_file)
+    
+
+
 
 
 def GUI():
@@ -138,6 +157,8 @@ def GUI():
     # dict after building them
     global Screens 
     Screens = {}
+
+
 
     ################################### Initialization Screen #########################
     # We create a frame that will contain everything under this screen, this frame will
@@ -201,7 +222,6 @@ def GUI():
 
 
 
-
     ############################### Frame for lockin ###############################
     # Repeat for lockin parameters
     lockin_parameters_frame = tk.Frame(Initialization_screen)
@@ -235,15 +255,55 @@ def GUI():
 
 
 
-    ################################### Experiment Screen #########################
+    ################################### Experiment Configuraiton Screen #########################
     # This screen holds the parameters to configure the experiment and visualize it
     Experiment_screen = tk.Frame(main_window)
     Screens["Experiment screen"] = Experiment_screen
 
-    label = tk.Label(Experiment_screen, text="Enter device experiment parameters", anchor="w")
-    row_num = 0
-    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    # Load experiment configuraiton parameters
+    with open('Utils\experiment_preset.json', "r") as json_file:
+        experiment_preset = json.load(json_file)
 
+    # TO DO: Allow user to add and configure many legs in the trip
+
+    # Create frame for input parameters
+    experiment_parameters_frame = tk.Frame(Experiment_screen)
+    experiment_parameters_frame.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+
+    row_num = 0
+    label = tk.Label(experiment_parameters_frame, text="Please input experiment parameters", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    row_num += 1
+
+    # Add labels in succession
+    Entries = []
+    for parameter, default_value in experiment_preset.items():
+
+        # For every parameter the user will input add a short description with a label 
+        label = tk.Label(experiment_parameters_frame, text=parameter, anchor="w")
+        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+
+        # Add an entry box for the user to write a parameter on the cell and place it to the right
+        entry = tk.Entry(experiment_parameters_frame)
+        entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+
+        # Fill entry box with the default value
+        entry.insert(0, str(default_value))
+        
+        # Store each entry into a list so we can read them later back into the software
+        Entries.append(entry)
+
+        # Following labels and entry boxes will be written a row below
+        row_num += 1
+    
+    # Load parameters when user changes them
+    button = tk.Button(Experiment_screen, text="Load parameters", command=partial(load_parameters, experiment_preset, Entries))
+    button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+
+    # Check whether input data is valid
+
+
+    ################################### Top bar ###################################
     # Drop down menu to select different screens
     menu_var = tk.StringVar(value="Initialization screen")  # Default value
     screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen)

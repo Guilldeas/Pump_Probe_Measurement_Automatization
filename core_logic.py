@@ -87,12 +87,12 @@ def initialization(Troubleshooting):
         # the return is non 0. The program will stop, throwing it to terminal in 
         # case any of their outputs correlate with an internal error
         if result != 0:
-            raise Exception(f"     TLI_BuildDeviceList failed: {clfun.get_error_description(result)}")
+            raise Exception(f"    · TLI_BuildDeviceList failed: {clfun.get_error_description(result)}")
         elif Troubleshooting:
-            print(f"     TLI_BuildDeviceList passed without raising errors")
+            print(f"    · TLI_BuildDeviceList passed without raising errors")
         
     except Exception as e:
-        print(f"    Error while Building device list {e}") 
+        print(f"    ·Error while Building device list {e}") 
 
 
 
@@ -102,23 +102,23 @@ def initialization(Troubleshooting):
     device_list = clfun.get_device_list_by_type(lib, device_type=103)
 
     if "103391384" in device_list:
-        print(f"    Succesfuly found delay stage in device list")
+        print(f"    ·Succesfuly found delay stage in device list")
 
     else:
-        print(f"       BBD301's serial number is NOT in list: {device_list}")
-        print(f"    Troubleshooting tip:\n    Try closing Kinesis Software if it's open\n    Try disconnecting and connecting USB cable")
-        raise Exception(f"     delay stage with serial number {serial_num.value} not in device list")
+        print(f"    ·   BBD301's serial number is NOT in list: {device_list}")
+        print(f"    ·Troubleshooting tip:\n    Try closing Kinesis Software if it's open\n    Try disconnecting and connecting USB cable")
+        raise Exception(f"    · delay stage with serial number {serial_num.value} not in device list")
 
 
     ########################### Open the device ###########################
     result = lib.BMC_Open(serial_num)
     time.sleep(1)
     if result != 0:
-        raise Exception(f"     BMC_Open failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_Open failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"    BMC_Open passed without raising errors")
+        print(f"    ·BMC_Open passed without raising errors")
     
-    print(f"    Succesfuly connected to Delay Stage")
+    print(f"    ·Succesfuly connected to Delay Stage")
 
     ########################### Load Settings ###########################
     # This step fixes a bug where the device doesn't know how to convert real units to device units 
@@ -129,29 +129,29 @@ def initialization(Troubleshooting):
 
     # This time the function returns a 0 for error and no error code
     if  result == 0:
-        raise Exception(f"     BMC_LoadSettings failed")
+        raise Exception(f"    · BMC_LoadSettings failed")
     elif Troubleshooting:
-        print(f"    BMC_LoadSettings passed without raising errors")
+        print(f"    ·BMC_LoadSettings passed without raising errors")
 
 
     ########################### Enable the motor channel ###########################
     result = lib.BMC_EnableChannel(serial_num, channel)
     time.sleep(1)
     if result != 0:
-        raise Exception(f"     BMC_EnableChannel failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_EnableChannel failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"     BMC_EnableChannel passed without raising erros, enabled channel: {channel.value}")
+        print(f"    · BMC_EnableChannel passed without raising erros, enabled channel: {channel.value}")
     
-    print(f"     Succesfuly enabled channel {channel.value}")
+    print(f"    · Succesfuly enabled channel {channel.value}")
 
 
     ########################### Start polling ###########################
     result = lib.BMC_StartPolling(serial_num, c_int(200))
     time.sleep(3)
     if result != 0:
-        raise Exception(f"     BMC_StartPolling failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_StartPolling failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"    BMC_StartPolling passed without raising errors")
+        print(f"    ·BMC_StartPolling passed without raising errors")
 
 
     ########################### Home ###########################
@@ -159,30 +159,30 @@ def initialization(Troubleshooting):
     can_move_without_homing_flag = c_bool()
     result = lib.BMC_CanMoveWithoutHomingFirst(byref(can_move_without_homing_flag)) # byref(variable) is a C pointer to that variable
     if result != 0:
-        raise Exception(f"     BMC_CanMoveWithoutHomingFirst failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_CanMoveWithoutHomingFirst failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"    BMC_CanMoveWithoutHomingFirst passed without raising errors")
+        print(f"    ·BMC_CanMoveWithoutHomingFirst passed without raising errors")
     
     # The funciton will return True when we can move without homing first
     if (not can_move_without_homing_flag.value): # variable.value is how we "cast" a C variable back to Python
 
-        print(f"    Delay stage needs to be homed before moving")
+        print(f"    ·Delay stage needs to be homed before moving")
         
         # Clear messaging que so that we can listen to the device for it's "finished homing" message
         result = lib.BMC_ClearMessageQueue(serial_num, channel)
         if result != 0:
-            raise Exception(f"     BMC_ClearMessageQueue failed: {clfun.get_error_description(result)}")
+            raise Exception(f"    · BMC_ClearMessageQueue failed: {clfun.get_error_description(result)}")
         elif Troubleshooting:
-            print(f"    BMC_ClearMessageQueue passed without raising errors")
+            print(f"    ·BMC_ClearMessageQueue passed without raising errors")
 
         # Home the stage
         result = lib.BMC_Home(serial_num, channel)
         time.sleep(1)
         if result != 0:
-            raise Exception(f"     BMC_Home failed: {clfun.get_error_description(result)}")
+            raise Exception(f"    · BMC_Home failed: {clfun.get_error_description(result)}")
         elif Troubleshooting:
-            print(f"    BMC_Home passed without raising errors")
-        print(f"    Homing now")
+            print(f"    ·BMC_Home passed without raising errors")
+        print(f"    ·Homing now")
 
         # Wait until we receive a message signaling homing completion
         message_type = c_ushort()  # WORD
@@ -192,10 +192,10 @@ def initialization(Troubleshooting):
             result = lib.BMC_GetNextMessage(serial_num, channel, 
                                             byref(message_type), byref(message_id), byref(message_data))
         
-        print(f"    Finished homing delay stage")
+        print(f"    ·Finished homing delay stage")
 
     else:
-        print(f"    Device doesn't need homing")
+        print(f"    ·Device doesn't need homing")
 
     ########################### Change velocity parameters ###########################
     # We set the parameters to the default that we see on screen when switching on the machines driver.
@@ -217,9 +217,9 @@ def initialization(Troubleshooting):
                                                 c_int(1)) # Pass int 1 to convert to device velocity units
     
     if result != 0:
-        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_GetDeviceUnitFromRealValue failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")
+        print(f"    ·BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
     result = lib.BMC_GetDeviceUnitFromRealValue(serial_num,
                                     channel, 
@@ -227,27 +227,27 @@ def initialization(Troubleshooting):
                                     byref(acceleration_dev), 
                                     c_int(2)) # Pass int 2 to convert to device acceleration units
     if result != 0:
-        raise Exception(f"     BMC_GetDeviceUnitFromRealValue failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_GetDeviceUnitFromRealValue failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"    BMC_GetDeviceUnitFromRealValue passed without raising errors")                                
+        print(f"    ·BMC_GetDeviceUnitFromRealValue passed without raising errors")                                
 
     result = lib.BMC_SetVelParams(serial_num, channel, acceleration_dev, max_velocity_dev)
     if result != 0:
-        raise Exception(f"     BMC_SetVelParams failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_SetVelParams failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"    BMC_SetVelParams passed without raising errors")
+        print(f"    ·BMC_SetVelParams passed without raising errors")
 
     if Troubleshooting:
-        print(f"       Set max velocity param to {max_velocity_real.value}mm/s or {max_velocity_dev.value}dev units/s")
-        print(f"       Set acceleration param to {acceleration_real.value}mm/s^2 or {acceleration_dev.value}dev units/s^2")
-        print(f"    Checking velocity params")
+        print(f"    ·   Set max velocity param to {max_velocity_real.value}mm/s or {max_velocity_dev.value}dev units/s")
+        print(f"    ·   Set acceleration param to {acceleration_real.value}mm/s^2 or {acceleration_dev.value}dev units/s^2")
+        print(f"    ·Checking velocity params")
     acceleration_dev = c_int()
     max_velocity_dev = c_int()
     result = lib.BMC_GetVelParams(serial_num, channel, byref(acceleration_dev),  byref(max_velocity_dev))
     if result != 0:
-        raise Exception(f"     BMC_GetVelParams failed: {clfun.get_error_description(result)}")
+        raise Exception(f"    · BMC_GetVelParams failed: {clfun.get_error_description(result)}")
     elif Troubleshooting:
-        print(f"    BMC_GetVelParams passed without raising errors")
+        print(f"    ·BMC_GetVelParams passed without raising errors")
 
     # Sanity check: Request params to device, convert back to real units and report to user.
     max_velocity_real = c_double()
@@ -263,17 +263,17 @@ def initialization(Troubleshooting):
                                         c_int(int(acceleration_dev.value)),
                                         byref(acceleration_real),
                                         c_int(2)) # Pass 2 for acceleration
-    print(f"       Succesfuly set stage's max velocity to {max_velocity_real.value}mm/s")
-    print(f"       Succesfuly set stage's acceleration to {acceleration_real.value}mm/s^2")
+    print(f"    ·   Succesfuly set stage's max velocity to {max_velocity_real.value}mm/s")
+    print(f"    ·   Succesfuly set stage's acceleration to {acceleration_real.value}mm/s^2")
     
-    print(f"    Delay Stage is configured and ready\n")
+    print(f"    ·Delay Stage is configured and ready\n")
 
 
 
     ########################### Establish lockin connection ###########################
     
     print(f"Configuring Lockin Amplifier:")
-    print(f"    Attempting to connect to Lockin Amplifer")
+    print(f"    ·Attempting to connect to Lockin Amplifer")
     lockin_USB_port = default_values_lockin["USBPort"]
     baud_rate = default_values_lockin["BaudRate"]
     time_out = default_values_lockin["TimeoutSeconds"]
@@ -283,14 +283,14 @@ def initialization(Troubleshooting):
 
     except Exception as e:
         print(f"Error{e}\nTroubleshooting:\n    1) Try to disconnect and recconnect the lockin USB then retry\n    2) If the problem persists verify that lockin is connected at {lockin_USB_port} on Windows device manager, if not change to correct port")
-    print(f"    Succesfuly connected to Lockin Amplifier\n")
+    print(f"    ·Succesfuly connected to Lockin Amplifier\n")
 
-    print(f"    Configuring lockin amplifier")
+    print(f"    ·Configuring lockin amplifier")
 
     try:
         clfun.configure_lockin(adapter)  
     except Exception as e:
-        print(f"    Error while configuring lockin amplifier {e}") 
+        print(f"    ·Error while configuring lockin amplifier {e}") 
 
     print("Inital setup finished.\n")
 
@@ -355,7 +355,7 @@ def perform_experiment(Troubleshooting):
                     num_steps = math.ceil( (end_position - start_position) / step_size )
                     estimated_duration = int(average_step_duration_sec * num_steps / 60) # in mins
 
-                    print(f"    Experiment is estimated to take {estimated_duration}min for these parameters.")
+                    print(f"    ·Experiment is estimated to take {estimated_duration}min for these parameters.")
                     print("    If you wish to change them input: n, if you wish to continue input: y")
                     user_input = input("")
                     if user_input == "y":
@@ -423,17 +423,17 @@ def perform_experiment(Troubleshooting):
                 for index in range(0, len(Positions)):
 
                     
-                    print(f"    Measurement at step: {index+1} of {len(Positions)}")
+                    print(f"    ·Measurement at step: {index+1} of {len(Positions)}")
                     clfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
                     
-                    print(f"    Awaiting for filter settling")
+                    print(f"    ·Awaiting for filter settling")
                     time.sleep(settling_time)                                                   # Settle
                     
-                    print(f"    Capturing data")
+                    print(f"    ·Capturing data")
                     Data[index] = clfun.request_R(adapter)                                      # Capture
                     print("\n")
 
-                print(f"    Experiment is finished\n")                
+                print(f"    ·Experiment is finished\n")                
 
 
 
