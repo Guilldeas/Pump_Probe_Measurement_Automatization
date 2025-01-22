@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import Toplevel
+from tkinter import messagebox
 import json
 import core_logic
 import threading
@@ -22,8 +23,10 @@ def show_screen(screen_name):
     Screens[screen_name].pack(fill="both", expand=True)
 
 
+
 def close_window(window):
     window.destroy()
+
 
 
 # Function to redirect stdout and stderr to a Queue
@@ -38,6 +41,8 @@ class OutputRedirector:
     def flush(self):
         pass  # Required for compatibility
 
+
+
 def capture_output(queue):
     """
     Redirect both stdout and stderr to the provided Queue.
@@ -45,12 +50,16 @@ def capture_output(queue):
     sys.stdout = OutputRedirector(queue)
     sys.stderr = OutputRedirector(queue)  # Capture exceptions
 
+
+
 def restore_output():
     """
     Restores the original stdout and stderr.
     """
     sys.stdout = sys.__stdout__
     sys.stderr = sys.__stderr__
+
+
 
 def initialize_button():
     def initialization_thread_logic():
@@ -115,21 +124,92 @@ def initialize_button():
     check_for_updates()
 
 
-def load_parameters(experiment_preset, Entries):
-    # Update parameters loaded from json into screen to
-    # new parameters on screen. We assume 
-    index = 0
-    for key, _ in experiment_preset.items():
 
-        # Entries are read with get and written into the dict
-        experiment_preset[key] = Entries[index].get()
-        index = index + 1
+def is_value_valid(parameter_name, parameter_value, parameter_rules):
+    '''
+    This function takes a value that's previously been fetched from 
+    the user and checks whether the value adheres to certain rules 
+    located on a "rules" dict, it returns a True if the value checks 
+    all rules or a False whenever one rule is not checked
+    '''
 
-    # Check whether variables are safe if not safe break before saving
+    # If there are no rules for this particular value 
+    # we break away from this function early
+    if not parameter_rules:
+        return True
+    
+    # If there rules for it we iterate through the dict of rules
+    for rule_type, rule_value in parameter_rules.items():
 
+        # Some rules check whether the type of data input is correct
+        if rule_type == "type":
+
+            # If the value is expected to be a string but its not
+            # we return a false and inform the user
+            if rule_value == "str" and not isinstance(parameter_value, str):
+                return False 
+
+            # In this case we must first attempt to cast to string since
+            # all values retreived from screen are retreived as strings
+            if rule_value == "float":    
+                
+                try:
+                    float_value = float(parameter_value)
+
+                except ValueError:
+                    messagebox.showinfo("Could not save parameters", f"Parameter {parameter_name} is not a valid floating point number, please use .  as decimal separator")
+                    return False
+
+        # Other rules specify a range of values
+        if rule_type == "max" and float_value > rule_value:
+            messagebox.showinfo("Could not save parameters", f"Parameter {parameter_name} is above maximum limit: {rule_value}")
+            return False
+        
+        if rule_type == "min" and float_value < rule_value:
+            messagebox.showinfo("Could not save parameters", f"Parameter {parameter_name} is below minimum limit: {rule_value}")
+            return False
+    
+
+    return True
+        
+
+
+
+
+
+
+def save_parameters(default_values, entries_widgets):#, validation_rules):
+    '''
+    This funciton gets user values from entries on the screen into a new 
+    temporary dict with the same structure as the one holding the 
+    default values. Then it checks whether the values are valid, if they
+    are it will save them on a json, if not it will inform the user of the
+    error. 
+    '''
+
+    # We construct the temporary dict
+    screen_values = {}
+    for parameter_name, _ in default_values.items():
+
+        # Each entry is read with get from the widgets stored in 
+        # the entries dict, this dict was constructed wth the same
+        # keys as experiment_preset
+        screen_values[parameter_name] = entries_widgets[parameter_name].get()
+
+    # Construct dict holding validation rules for each value
+    with open('Utils\experiment_preset_validation_rules.json', "r") as json_file:
+        validation_rules = json.load(json_file)
+    
+    # Check that each parameter verifies all validation rules
+    for parameter_name, value in screen_values.items():
+        
+        # If it's not valid we exit before saving them
+        if not is_value_valid(parameter_name, value, validation_rules[parameter_name]):
+            return
+        
     # Write them into the json
     with open('Utils\experiment_preset.json', "w") as json_file:
-        json.dump(experiment_preset, json_file)
+        json.dump(screen_values, json_file)
     
 
 
@@ -199,7 +279,7 @@ def GUI():
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     row_num += 1
 
-    # Add labels in succession
+    
     for parameter, default_value in default_values_delay_stage.items():
 
         # For every parameter the user will input add a short description with a label 
@@ -275,8 +355,8 @@ def GUI():
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     row_num += 1
 
-    # Add labels in succession
-    Entries = []
+    # Add labels and entries following the "default values" json structure
+    entries = {} # Store entries for later use
     for parameter, default_value in experiment_preset.items():
 
         # For every parameter the user will input add a short description with a label 
@@ -290,17 +370,24 @@ def GUI():
         # Fill entry box with the default value
         entry.insert(0, str(default_value))
         
-        # Store each entry into a list so we can read them later back into the software
-        Entries.append(entry)
+        # Store entries on a different dict to read their screen values later
+        entries[parameter] = entry
 
         # Following labels and entry boxes will be written a row below
         row_num += 1
     
-    # Load parameters when user changes them
-    button = tk.Button(Experiment_screen, text="Load parameters", command=partial(load_parameters, experiment_preset, Entries))
+    # Check for valid parameters and save them when user requests it
+    button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset, entries))
     button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 
-    # Check whether input data is valid
+    # TO DO: Implement loading different experiment presets, right now there only one, default, and the 
+    # user overwrites it to save a preset.
+
+    # TO DO: Launch an experiment with the new values.
+    #   · Reuse validation funcitonality from preset saving
+    #   · Show graph on screen as experiment takes place
+    #   · Reuse action/error log from initialization
+
 
 
     ################################### Top bar ###################################
