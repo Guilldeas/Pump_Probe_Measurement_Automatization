@@ -18,7 +18,7 @@ from ctypes import *
 import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
-import math
+from math import ceil
 import json
 import core_logic_functions as clfun
 
@@ -39,8 +39,9 @@ def perform_experiment_dummy(Troubleshooting):
         time.sleep(1)
         print(f"Task {task} completed")
 
-####################################### MAIN CODE #######################################
 
+
+####################################### MAIN CODE #######################################
 def initialization(Troubleshooting):
 
     print(f"Please wait for initial setup\n")
@@ -295,220 +296,149 @@ def initialization(Troubleshooting):
     print("Inital setup finished.\n")
 
 
+# Honestly it's so messy to write the function here but I can't get the scope of adapter
+# to be accesible at the main script so I'll take the L
+def request_time_constant(start_position, end_position, step_size):
 
+    time_constant = clfun.request_time_constant(adapter)
+    settling_time = 5 * time_constant
+    average_step_duration_sec = 0.5 + settling_time
+    num_steps = ceil( (end_position - start_position) / step_size )
+    estimated_duration = int(average_step_duration_sec * num_steps )
 
-def perform_experiment(Troubleshooting):
-            ########################### Request scan parameters to user ###########################
+    return estimated_duration
 
-            # Repeat experiments without homing again
-            New_Experiment = True
-            while (New_Experiment):
+    
+    
 
-                    
-                # Request scan variables to user at the begining of the experiment
-                print("Please introduce the following parameters to define the scan:")
+def perform_experiment(start_position, end_position, step_size):
 
-                finished_taking_params = False
-                while(not finished_taking_params):
-                    
-                    # Only allow variables within reasonable limits
-                    print("\n")
-                    parameter_is_valid = False
-                    while not parameter_is_valid:
-                        start_position = float(input("    Initial position (between 0.0 and 600.0, use decimal point) [mm]: "))
+    ########################### Build scan positions list ###########################
 
-                        if (0.0 <= start_position < 600.0):
-                            parameter_is_valid = True
+    # Create a list to store both positions to scan and rms voltages measured
+    Positions = []
+    Position_within_limtis = True
 
-                        else:
-                            print("    Please introduce a start position between 0.0 and 600.0!")
+    # Edge case: First position is computed outside the loop
+    new_position = start_position
 
-                    print("\n")
-                    parameter_is_valid = False
-                    while not parameter_is_valid:
-                        end_position = float(input("    Final position (greater than initial position) [mm]: "))
+    # Check that the new computed position is whithin stage travel limits
+    if (start_position <= new_position <= end_position):
+        Positions.append(new_position)
 
-                        if (0.0 < end_position <= 600.0) and (end_position > start_position):
-                            parameter_is_valid = True
+    # Following positions will be computed on the loop
+    while(Position_within_limtis):
 
-                        else:
-                            print("    Please introduce an end position greater than the initial position and between 0.0 and 600.0!")
+        new_position = new_position + step_size
 
-                    print("\n")
-                    parameter_is_valid = False
-                    while not parameter_is_valid:
-                        step_size = float(input("    Step size [mm]: "))
+        # Check that the new computed position is whithin stage travel limits
+        if (start_position <= new_position <= end_position):
+            Positions.append(new_position)
+        
+        # If not within limits then we stop adding new steps
+        else:
+            Position_within_limtis = False
 
-                        if (0.0 < step_size < 600.0) and (step_size <= end_position-start_position):
-                            parameter_is_valid = True
+            # Add end position if not in list already
+            if (end_position not in Positions):
+                Positions.append(end_position)
 
-                        else:
-                            print("    Please introduce a positive step size that is smaller or equal to the scan range!")
-
-                    # Estimate execution time for the parameters selected and report to user
-                    print("\n")
-
-                    # Time between singal change and lockin's LP settling, I need it here to estimate experiment duration 
-                    time_constant = clfun.request_time_constant(adapter)
-                    settling_time = 5*time_constant
-                    average_step_duration_sec = 0.5 + settling_time
-                    num_steps = math.ceil( (end_position - start_position) / step_size )
-                    estimated_duration = int(average_step_duration_sec * num_steps / 60) # in mins
-
-                    print(f"    ·Experiment is estimated to take {estimated_duration}min for these parameters.")
-                    print("    If you wish to change them input: n, if you wish to continue input: y")
-                    user_input = input("")
-                    if user_input == "y":
-                        finished_taking_params = True
-                    
-                    else:
-                        finished_taking_params = False
-                        print("    Please input new parameters")
-                    
-
-                # Get file name to store data
-                print("\n")
-                parameter_is_valid = False
-                while not parameter_is_valid:
-                    experiment_title = input("    Please introduce title for experiment (avoid using special characters): ")
-                    
-                    if(clfun.is_valid_file_name(experiment_title)):
-                        parameter_is_valid = True
-                    
-                    else:
-                        print("    Please avoid invalid characters for Windows files")
-                
-
-
-                ########################### Build scan positions list ###########################
-
-                # Create a list to store both positions to scan and rms voltages measured
-                Positions = []
-                Position_within_limtis = True
-
-                # Edge case: First position is computed outside the loop
-                new_position = start_position
-
-                # Check that the new computed position is whithin stage travel limits
-                if (start_position <= new_position <= end_position):
-                    Positions.append(new_position)
-
-                # Following positions will be computed on the loop
-                while(Position_within_limtis):
-
-                    new_position = new_position + step_size
-
-                    # Check that the new computed position is whithin stage travel limits
-                    if (start_position <= new_position <= end_position):
-                        Positions.append(new_position)
-                    
-                    # If not within limits then we stop adding new steps
-                    else:
-                        Position_within_limtis = False
-
-                        # Add end position if not in list already
-                        if (end_position not in Positions):
-                            Positions.append(end_position)
-
-                Data = np.zeros_like(np.array(Positions))
+    Data = np.zeros_like(np.array(Positions))
 
 
 
+    ########################### Scan and Measure at list of positions ###########################
+    clfun.autorange(adapter)
+    clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
 
-                ########################### Scan and Measure at list of positions ###########################
-                
-                clfun.autorange(adapter)
-                clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
+    # Wait for filter settling
+    time_constant = clfun.request_time_constant(adapter)
+    settling_time = 5 * time_constant
 
-                for index in range(0, len(Positions)):
+    for index in range(0, len(Positions)):
 
-                    
-                    print(f"    ·Measurement at step: {index+1} of {len(Positions)}")
-                    clfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
-                    
-                    print(f"    ·Awaiting for filter settling")
-                    time.sleep(settling_time)                                                   # Settle
-                    
-                    print(f"    ·Capturing data")
-                    Data[index] = clfun.request_R(adapter)                                      # Capture
-                    print("\n")
+        
+        print(f"    ·Measurement at step: {index+1} of {len(Positions)}")
+        clfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
+        
+        print(f"    ·Awaiting for filter settling")
+        time.sleep(settling_time)                                                   # Settle
+        
+        print(f"    ·Capturing data")
+        Data[index] = clfun.request_R(adapter)                                      # Capture
+        print("\n")
 
-                print(f"    ·Experiment is finished\n")                
-
-
-
-                ########################### Store and display data ###########################
-
-                # Create a folder to store data into
-
-                # Get the directory of the current script
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-
-                # Get the parent directory
-                parent_dir = os.path.dirname(current_dir)
-
-                # Define the Output folder path
-                output_folder = os.path.join(parent_dir, "Output")
-
-                # Create the Output folder if it doesn't exist
-                if not os.path.exists(output_folder):
-                    os.makedirs(output_folder)
-                    print(f"Created folder: {output_folder}")
-                
-                # Create a subfolder at Output to store the experiment data
-                data_folder = os.path.join(output_folder, experiment_title)
-            
-                print(f"Storing data on CSV file")
-
-                # Create a DataFrame with headers
-                df = pd.DataFrame({
-                    "Delay position (mm)": np.array(Positions),
-                    "Voltage from PD (Vrms)": Data
-                })
-
-                # Get current date as a string
-                date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
-                CSV_file_title = experiment_title + ".csv"
-
-                # Create a string storing relevant experiment data
-                experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}V")
-
-                # Write the parameters and data to a CSV file
-                with open(CSV_file_title, "w") as file:
-                    file.write(f"# {experiment_params}\n")  # Add the parameters as a comment line
-                    df.to_csv(file, index=False)
-
-                print(f"Showing curve on screen, please close the graphs window to continue7")
-                # Show data
-                plt.plot(Positions, Data)
-                plt.xlabel('Delay position (mm)')
-                plt.ylabel('Measured PD voltage (Vrms)')
-                #plt.legend()
-                plt.show()
-
-                # Request user to whether they want to perform a new experiment
-                user_input = input("To perform a new experiment input: y\n To close the program input: n\n")
-                if (user_input == "y"):
-                    New_Experiment = True
-                if (user_input == "n"):
-                    New_Experiment = False
+    print(f"    ·Experiment is finished\n")                
 
 
 
-            ########################### Close the device ###########################
-            lib.BMC_StopPolling(serial_num, channel) # Does not return error codes
-            
-            result = lib.BMC_Close(serial_num)
-            time.sleep(1)
-            if result != 0:
-                raise Exception(f"BMC_Close failed: {clfun.get_error_description(result)}")
-            elif Troubleshooting:
-                print(f"BMC_Close passed without raising errors")
-            
-            print(f"Succesfully closed communications to Delay Stage")
+def store_and_display(experiment_title, Positions, Data, time_constant):
+    ########################### Store and display data ###########################
 
-            clfun.close_connection(adapter)
-            print("Succesfully closed connection to lockin")
+    # Create a folder to store data into
+
+    # Get the directory of the current script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Get the parent directory
+    parent_dir = os.path.dirname(current_dir)
+
+    # Define the Output folder path
+    output_folder = os.path.join(parent_dir, "Output")
+
+    # Create the Output folder if it doesn't exist
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created folder: {output_folder}")
+
+    # Create a subfolder at Output to store the experiment data
+    data_folder = os.path.join(output_folder, experiment_title)
+
+    print(f"Storing data on CSV file")
+
+    # Create a DataFrame with headers
+    df = pd.DataFrame({
+        "Delay position (mm)": np.array(Positions),
+        "Voltage from PD (Vrms)": Data
+    })
+
+    # Get current date as a string
+    date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
+    CSV_file_title = experiment_title + ".csv"
+
+    # Create a string storing relevant experiment data
+    experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}V")
+
+    # Write the parameters and data to a CSV file
+    with open(CSV_file_title, "w") as file:
+        file.write(f"# {experiment_params}\n")  # Add the parameters as a comment line
+        df.to_csv(file, index=False)
+
+    print(f"Showing curve on screen, please close the graphs window to continue7")
+    # Show data
+    plt.plot(Positions, Data)
+    plt.xlabel('Delay position (mm)')
+    plt.ylabel('Measured PD voltage (Vrms)')
+    #plt.legend()
+    plt.show()
+
+
+
+def close_devices(Troubleshooting):
+    ########################### Close the device ###########################
+    lib.BMC_StopPolling(serial_num, channel) # Does not return error codes
+    
+    result = lib.BMC_Close(serial_num)
+    time.sleep(1)
+    if result != 0:
+        raise Exception(f"BMC_Close failed: {clfun.get_error_description(result)}")
+    elif Troubleshooting:
+        print(f"BMC_Close passed without raising errors")
+    
+    print(f"Succesfully closed communications to Delay Stage")
+
+    clfun.close_connection(adapter)
+    print("Succesfully closed connection to lockin")
             
 
 '''def main(Troubleshooting=False):
