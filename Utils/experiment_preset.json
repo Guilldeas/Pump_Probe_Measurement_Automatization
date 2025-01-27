@@ -1,1 +1,1 @@
-{"start_position_mm": 0.0, "end_position_mm": 40.0, "step_size_mm": 10.0, "experiment_title": "experiment_0"}
+{"experiment_name": "experiment_1", "time_constant": "3", "trip_legs": {"0": {"start_position_mm": 20.0, "end_position_mm": 60.0, "step_size_mm": 10.0}, "1": {"start_position_mm": 70.0, "end_position_mm": 80.0, "step_size_mm": 1.0}}}

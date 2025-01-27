@@ -296,6 +296,7 @@ def initialization(Troubleshooting):
     print("Inital setup finished.\n")
 
 
+
 # Honestly it's so messy to write the function here but I can't get the scope of adapter
 # to be accesible at the main script so I'll take the L
 def request_time_constant(start_position, end_position, step_size):
@@ -311,7 +312,7 @@ def request_time_constant(start_position, end_position, step_size):
     
     
 
-def perform_experiment(start_position, end_position, step_size):
+def perform_experiment(start_position, end_position, step_size, experiment_title, time_constant):
 
     ########################### Build scan positions list ###########################
 
@@ -357,7 +358,6 @@ def perform_experiment(start_position, end_position, step_size):
 
     for index in range(0, len(Positions)):
 
-        
         print(f"    ·Measurement at step: {index+1} of {len(Positions)}")
         clfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
         
@@ -368,11 +368,9 @@ def perform_experiment(start_position, end_position, step_size):
         Data[index] = clfun.request_R(adapter)                                      # Capture
         print("\n")
 
-    print(f"    ·Experiment is finished\n")                
+    print(f"    ·Experiment is finished\n")       
 
-
-
-def store_and_display(experiment_title, Positions, Data, time_constant):
+'''
     ########################### Store and display data ###########################
 
     # Create a folder to store data into
@@ -422,7 +420,7 @@ def store_and_display(experiment_title, Positions, Data, time_constant):
     #plt.legend()
     plt.show()
 
-
+'''
 
 def close_devices(Troubleshooting):
     ########################### Close the device ###########################

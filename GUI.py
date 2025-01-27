@@ -10,14 +10,22 @@ import sys
 from queue import Queue
 from functools import partial
 from math import ceil
+from tkinter import simpledialog
 
 
 # TO DO list: From most to least important
-#   · Implement a way to save data and safely closing the program
-#   · Show graph on screen as experiment takes place (error bars?)
 #   · Implement a way to add multiple legs to the trip
-#   · Implement a way to change time constant, gain or whatever may affect each leg
+#   · Implement time constant
+#   · Implement a way to save data and safely closing the program
 #   · Change from mm to fs or whatever
+#   · Show graph on screen as experiment takes place (error bars?)
+#   · Specify time zero
+#   · Define waiting time and number of pulses averaged and store in csv
+#   · If OVERLOAD then AUTOGAIN else proceed
+#   · Add minimum requirement for step length (look how small can it be on the delay stage docs)
+#   · Add minimum requirement for step length (look how small can it be on the delay stage docs)
+#   · Implement a way to change, gain or whatever may affect each leg
+#   · Add comment header to CSV
 #   · Implement loading different experiment presets, right now there only one, default, and the 
 #     user overwrites it to save a preset.
 #   · Move functions on GUI.py to their own library
@@ -230,9 +238,9 @@ def is_value_valid(parameter_name, parameter_value, parameter_rules):
 
 
 
-def validate_parameters(default_values, entries_widgets):
+def get_parse_validate_screen_params(default_values, entries_widgets):
     '''
-    This funciton gets user values from entries on the screen into a new 
+    This function gets user values from entries on the screen into a new 
     temporary dict with the same structure as the one holding the 
     default values. It parses them properly and it checks whether the values
     are valid, if they are it will save them on a json, if not it will inform
@@ -247,7 +255,7 @@ def validate_parameters(default_values, entries_widgets):
 
         # Each entry is read with get from the widgets stored in 
         # the entries dict, this dict was constructed wth the same
-        # keys as experiment_preset
+        # keys as leg_parameters
         screen_values[parameter_name] = entries_widgets[parameter_name].get()
 
     # Construct dict holding validation rules for each value
@@ -278,23 +286,36 @@ def validate_parameters(default_values, entries_widgets):
 
 
 
-def save_parameters(default_values, entries_widgets):
+def save_parameters(experiment_preset, entries_widgets):
     
-    valid_parameters, screen_values = validate_parameters(default_values, entries_widgets)
- 
-    if valid_parameters:
+    trip_legs = experiment_preset["trip_legs"]
 
-        # Write them into the json
-        with open('Utils\experiment_preset.json', "w") as json_file:
-            json.dump(screen_values, json_file)
+    # We create empty presets to store parameters after validation
+    trip_legs_entries = entries_widgets["trip_legs"]
+    experiment_preset_save = {}
+    trip_legs_save = {}
+    for leg_number, leg_parameters in trip_legs.items():
+        valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters, trip_legs_entries[leg_number])
+    
+        # If any of the parameters is not valid we return
+        if not valid_parameters:
+            return
         
-            messagebox.showinfo("Parameters saved", f"Parameters were succesfully saved")
-
-
-    # If any of the parameters is not valid we return
-    else:
-        return
+        # If the parameters for this particular leg were correct we keep them on a dict
+        trip_legs_save[leg_number] = screen_parameters
     
+    # Finally we construct a dict to save it by getting the parameters from screen that don't need to save the validated
+    experiment_preset_save["experiment_name"] = entries_widgets["experiment_name"].get()
+    experiment_preset_save["time_constant"] = entries_widgets["time_constant"].get()
+    experiment_preset_save["trip_legs"] = trip_legs_save
+    
+    # After all tests have passed we save them into a json
+    with open('Utils\experiment_preset.json', "w") as json_file:
+    
+        json.dump(experiment_preset_save, json_file)
+    
+        messagebox.showinfo("Parameters saved", f"Parameters were succesfully saved")
+
 
 
 def launch_experiment(default_values, entries_widgets, start_position, end_position, step_size):
@@ -304,7 +325,7 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
         return
 
     # Verify parameters are safe before launching the experiment
-    valid_parameters, screen_values = validate_parameters(default_values, entries_widgets)
+    valid_parameters, screen_values = get_parse_validate_screen_params(default_values, entries_widgets)
 
     if valid_parameters:
 
@@ -341,7 +362,7 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
             # Redirect stdout and stderr to the queue
             capture_output(output_queue)
 
-            # Run initialization on a different thread
+            # Run experiment on a different thread
             experiment_thread = threading.Thread(target=experiment_thread_logic, 
                                                  args=(start_position, end_position, step_size))
             experiment_thread.start()
@@ -376,44 +397,170 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
 
 
 
-def extimate_experiment_timespan(experiment_preset, entries, start_position, end_position, step_size):
+def estimate_experiment_timespan(leg_parameters, entries, start_position, end_position, step_size):
 
-    # First get parameters from screen and verify they are valid
-    valid_parameters, screen_values = validate_parameters(experiment_preset, entries)
+    try:
+        # First get parameters from screen and verify they are valid
+        valid_parameters, screen_values = get_parse_validate_screen_params(leg_parameters, entries)
 
-    if valid_parameters:
+        if valid_parameters:
 
-        start_position = screen_values["start_position_mm"]
-        end_position = screen_values["end_position_mm"]
-        step_size = screen_values["step_size_mm"]
-        estimated_duration = core_logic.request_time_constant(start_position, end_position, step_size)
+            start_position = screen_values["start_position_mm"]
+            end_position = screen_values["end_position_mm"]
+            step_size = screen_values["step_size_mm"]
+            estimated_duration = core_logic.request_time_constant(start_position, end_position, step_size)
 
-        estimation_message = ""
-        # When estimated duration is below 1 min we give an estimation in seconds
-        # to make it more readable
-        if estimated_duration < 60:
-            estimation_message = str(estimated_duration) + " seconds"
+            estimation_message = ""
+            # When estimated duration is below 1 min we give an estimation in seconds
+            # to make it more readable
+            if estimated_duration < 60:
+                estimation_message = str(estimated_duration) + " seconds"
 
-        # Readability for experiments below an hour
-        elif estimated_duration < 60*60:
-            estimated_duration_mins = int(estimated_duration / 60)
-            estimated_duration_secs = int(estimated_duration % 60)
+            # Readability for experiments below an hour
+            elif estimated_duration < 60*60:
+                estimated_duration_mins = int(estimated_duration / 60)
+                estimated_duration_secs = int(estimated_duration % 60)
 
-            estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds"
+                estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds"
 
-        # Experiments below a day
-        elif estimated_duration < 60*60*24:
-            estimated_duration_hours = int(estimated_duration / (60*60))
-            estimated_duration_mins = int(estimated_duration % (60*60))
-            #estimated_duration_secs = int(estimated_duration % 60)
+            # Experiments below a day
+            elif estimated_duration < 60*60*24:
+                estimated_duration_hours = int(estimated_duration / (60*60))
+                estimated_duration_mins = int(estimated_duration % (60*60))
+                #estimated_duration_secs = int(estimated_duration % 60)
 
-            estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
+                estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
+            
+
+            messagebox.showinfo("Estimation", f"Exeriment is estimated to take {estimation_message}")
         
+        if not valid_parameters:
+            return
 
-        messagebox.showinfo("Estimation", f"Exeriment is estimated to take {estimation_message}")
+    # Wrap up user friendly errors into 
+    except NameError as error_message:
+
+        # Case where the user has attempted to estimate without connecting to the lockin
+        if "adapter" in str(error_message):
+            messagebox.showinfo("Could not estimate timespan", "Please start device intialization before estimating time.")
+
+
+
+def create_experiment_gui_from_dict(Experiment_Frame, Entries_Frame, experiment_preset, overwrite_screen=False):
+
+    if overwrite_screen:
+
+        # If something was drawn before we need to delete it first
+        Entries_frame.pack_forget()
+
+        # And then create a new frame with the same name for 
+        # reference when switching screens
+        Entries_frame = tk.Frame(Experiment_Frame)
+        Screens["Experiment screen"] = Entries_frame
+
+        Entries_frame.pack()
+
+
+    experiment_name = experiment_preset["experiment_name"]
+    time_constant = experiment_preset["time_constant"]
+    trip_legs = experiment_preset["trip_legs"]
+
+    # Create frame for input parameters
+    experiment_parameters_frame = tk.Frame(Entries_Frame)
+    experiment_parameters_frame.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+
+    row_num = 1
+    label = tk.Label(experiment_parameters_frame, text="Please input experiment parameters", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    row_num += 1
+
+    # We will create a dict with an equal structure to our json, under the same keys we'll store 
+    # the widgets for the entries, that is a way to get values from the screen
+    entries = {}
+
+    # First we start with the entries that are not iterable (this snippet is not
+    # readable, please refer to the for loop below for comments)
+    label = tk.Label(experiment_parameters_frame, text="experiment file name", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    entry = tk.Entry(experiment_parameters_frame)
+    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+    entry.insert(0, experiment_name)
+    entries["experiment_name"] = entry
+    row_num += 1
+
+    # time constant can only be a series of values
+    time_constant_table = [1e-6, 3e-6, 10e-6, 30e-6, 100e-6, 300e-6, 1e-3, 3e-3, 10e-3, 30e-3, 100e-3, 300e-3, 1, 3, 10, 30, 100, 300, 1e3, 3e3, 10e3, 30e3]
+
+    # Create Combobox to select time constant from
+    label = tk.Label(experiment_parameters_frame, text="time constant [s]", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    combo = ttk.Combobox(experiment_parameters_frame, values=time_constant_table, state="readonly")
+    combo.set(time_constant)  # Default value
+    combo.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+    entries["time_constant"] = combo
+    row_num += 1
+
+    trip_legs_entries = {}
+    # trip_legs is a dict storing each leg with it's corresponding parameters
+    for leg_number, leg_parameters in trip_legs.items():
+
+        # For starters we keep the parameters for each leg into their own buffer dict
+        trip_leg = {}
+
+        # Label at the start the number for the leg
+        label = tk.Label(experiment_parameters_frame, text=f"leg number {leg_number}", anchor="w")
+        label.grid(row=row_num, column=0, padx=10, pady=15, sticky="w")
+        row_num += 1
+
+        # For each leg parameters we iteratively write them on screen
+        for parameter, default_value in leg_parameters.items():
+
+            # For every parameter the user will input add a short description with a label 
+            label = tk.Label(experiment_parameters_frame, text=parameter, anchor="w")
+            label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+
+            # Add an entry box for the user to write a parameter on the cell and place it to the right
+            entry = tk.Entry(experiment_parameters_frame)
+            entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+
+            # Fill entry box with the default value
+            entry.insert(0, str(default_value))
+            
+            # Store entries on a different dict to read their screen values later
+            trip_leg[parameter] = entry
+
+            # Following labels and entry boxes will be written a row below
+            row_num += 1
+        
+        # At the end of drawing and with all of the widgets for a certain leg retrieved 
+        # we store the buffer dict into the dict holding all of the trips with it's appopiate key
+        trip_legs_entries[leg_number] = trip_leg
     
-    if not valid_parameters:
-        return
+    # And at the end of the loop we append all of the trips to the main entries dict
+    entries["trip_legs"] = trip_legs_entries
+
+    return entries
+
+
+
+def edit_trip_legs(Experiment_Frame, Entries_frame):
+
+    # We first ask the user to input number of legs in the trip
+    num_legs = int(simpledialog.askstring("Input", "Please enter number of legs in the trip:"))
+
+    # We then construct a dict from which to construct the GUI later holding placeholder values
+    new_experiment_dict = {"experiment_name": "new_experiment","time_constant": "1"}
+    
+    # We now append as many trip legs as requested
+    new_legs = {}
+    for leg_number in range(0, num_legs):
+        new_legs[str(leg_number)] = {"start_position_mm": 0.0, "end_position_mm": 0.0, "step_size_mm": 0.0}
+
+    new_experiment_dict["trip_legs"] = new_legs
+
+    # And proceed to construct a new frame with the placeholder data, passing these arguments deletes
+    # the previously drawn frame
+    create_experiment_gui_from_dict(Experiment_Frame, Entries_frame, new_experiment_dict,  overwrite_screen=True)
 
 
 
@@ -485,7 +632,7 @@ def GUI():
     
     for parameter, default_value in default_values_delay_stage.items():
 
-        # For every parameter the user will input add a short description with a label 
+        # For every parameter add a short description with a label 
         label = tk.Label(delay_parameters_frame, text=parameter, anchor="w")
         label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
@@ -543,69 +690,50 @@ def GUI():
     Experiment_screen = tk.Frame(main_window)
     Screens["Experiment screen"] = Experiment_screen
 
-    # Load experiment configuraiton parameters
+    # Load experiment configuration parameters
     with open('Utils\experiment_preset.json', "r") as json_file:
         experiment_preset = json.load(json_file)
 
-    # TO DO: Allow user to add and configure many legs in the trip
+    # Create a frame for the entries alone so we can overwrite them when the user decides to add legs to the trip
+    Entries_frame = tk.Frame(Experiment_screen)
+    Screens["Experiment screen entries"] = Entries_frame
 
-    # Create frame for input parameters
-    experiment_parameters_frame = tk.Frame(Experiment_screen)
-    experiment_parameters_frame.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+    # Initially we draw the GUI for the input loaded from the experiment preset into a dict
+    entries = create_experiment_gui_from_dict(Experiment_screen, Entries_frame, experiment_preset)
 
-    row_num = 0
-    label = tk.Label(experiment_parameters_frame, text="Please input experiment parameters", anchor="w")
-    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-    row_num += 1
+    # We now ask the user if they want to edit the number of legs on the trip
+    button = tk.Button(Experiment_screen, text="Edit number of trip legs", command=partial(edit_trip_legs, Experiment_screen, Entries_frame))
+    button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
-    # Add labels and entries following the "default values" json structure
-    entries = {} # Store entries for later use
-    for parameter, default_value in experiment_preset.items():
-
-        # For every parameter the user will input add a short description with a label 
-        label = tk.Label(experiment_parameters_frame, text=parameter, anchor="w")
-        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-
-        # Add an entry box for the user to write a parameter on the cell and place it to the right
-        entry = tk.Entry(experiment_parameters_frame)
-        entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
-
-        # Fill entry box with the default value
-        entry.insert(0, str(default_value))
-        
-        # Store entries on a different dict to read their screen values later
-        entries[parameter] = entry
-
-        # Following labels and entry boxes will be written a row below
-        row_num += 1
-    
-    # Check for valid parameters and save them when user requests it
+    # Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
     button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset, entries))
-    button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+    button.grid(row=3, column=1, padx=10, pady=5, sticky="w")
 
-
+    '''
     # This button launches a scan
     with open('Utils\experiment_preset.json', "r") as json_file:
         screen_values = json.load(json_file)
+    
+
     button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment,
-                                                                                        experiment_preset, 
+                                                                                        leg_parameters, 
                                                                                         entries, 
                                                                                         screen_values["start_position_mm"],
                                                                                         screen_values["end_position_mm"], 
-                                                                                        screen_values["step_size_mm"],))
+                                                                                        screen_values["step_size_mm"]))
     button.grid(row=3, column=2, padx=10, pady=5, sticky="w")
 
 
     # Inform user of expected experiment time before launching experiment
-    button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=partial(extimate_experiment_timespan,
-                                                                                        experiment_preset, 
+    button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=partial(estimate_experiment_timespan,
+                                                                                        leg_parameters, 
                                                                                         entries, 
                                                                                         screen_values["start_position_mm"],
                                                                                         screen_values["end_position_mm"], 
-                                                                                        screen_values["step_size_mm"],))
-    button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
+                                                                                        screen_values["step_size_mm"]))
+    button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
-
+    '''
     ################################### Top bar ###################################
     # Drop down menu to select different screens
     menu_var = tk.StringVar(value="Initialization screen")  # Default value
