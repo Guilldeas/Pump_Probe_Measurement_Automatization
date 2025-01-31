@@ -9,7 +9,7 @@ import threading
 import sys
 from queue import Queue
 from functools import partial
-from math import ceil
+from math import floor
 from tkinter import simpledialog
 
 
@@ -49,7 +49,7 @@ def show_screen_from_menu(screen_name):
 
 
 def show_screen(screen_name, frame_type):
-    # This funciton switches between frames, this could be a
+    # This function switches between frames, this could be a
     # switch between screens, specificaly to screen "screen_name" 
     # or between frames on a screen, to specify this we use the
     # variable "frame_type". These are really just keys on the 
@@ -60,7 +60,7 @@ def show_screen(screen_name, frame_type):
     # Screens = {
     #     "Initialization screen": {
     #         "Screen frame": "Init_parent_frame",
-    #         "Child frame": {}
+    #         "Child frame": {}ew
     #         },
     # 
     #     "Experiment screen": {
@@ -81,7 +81,7 @@ def show_screen(screen_name, frame_type):
         frames[frame_type].grid_forget()
 
     # Show the selected frame
-    Screens[screen_name][frame_type].grid(row=0, column=0, sticky="nsew")
+    Screens[screen_name][frame_type].grid(row=2, column=0, sticky="ew") # Row 2 because we always have the separator and menuvar on top
 
 
 
@@ -126,8 +126,8 @@ def initialization_thread_logic():
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.initialization(Troubleshooting=False)
-        #core_logic.initialization_dummy(Troubleshooting=False)
+        #core_logic.initialization(Troubleshooting=False)
+        core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -140,8 +140,8 @@ def experiment_thread_logic(start_position, end_position, step_size):
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.perform_experiment(start_position, end_position, step_size)
-        #core_logic.initialization_dummy(Troubleshooting=False)
+        #core_logic.perform_experiment(start_position, end_position, step_size)
+        core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -163,7 +163,7 @@ def initialize_button():
     scrollbar = tk.Scrollbar(waiting_window, orient=tk.VERTICAL)
 
     # Place Listbox and Scrollbar using grid()
-    listbox.grid(row=0, column=0, sticky="nsew")  # Expand in all directions
+    listbox.grid(row=0, column=0, sticky="ew")  # Expand in all directions
     scrollbar.grid(row=0, column=1, sticky="ns")  # Stretch only vertically
 
     # Configure the scrollbar
@@ -206,8 +206,10 @@ def initialize_button():
             initialized = True
 
             # Add button to close window
+            # IDK why this button does not show in the GUI but since it does the same as manually closing the window
+            # I'll ignore it for now (probably forever if you are reading this)
             button = tk.Button(waiting_window, text="Ok", command=partial(close_window, waiting_window))
-            button.button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
+            button.button.grid(row=1, column=1, padx=20, pady=20, sticky="s")
 
     # Start checking for updates
     #check_for_updates(output_queue, listbox, initialization_thread, waiting_window, label)
@@ -389,7 +391,7 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
             scrollbar = tk.Scrollbar(monitoring_window, orient=tk.VERTICAL)
 
             # Place widgets using grid
-            listbox.grid(row=0, column=0, sticky="nsew")
+            listbox.grid(row=0, column=0, sticky="ew")
             scrollbar.grid(row=0, column=1, sticky="ns")
 
             # Configure scrollbar
@@ -445,52 +447,62 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
 
 
 
-def estimate_experiment_timespan(leg_parameters, entries, start_position, end_position, step_size):
+def estimate_experiment_timespan(legs_dict, entries):
 
-    try:
-        # First get parameters from screen and verify they are valid
-        valid_parameters, screen_values = get_parse_validate_screen_params(leg_parameters, entries)
+    estimated_duration = None
 
-        if valid_parameters:
+    # Iterate through dict containing all trip legs
+    for leg_parameters in legs_dict.values():
 
-            start_position = screen_values["start_position_mm"]
-            end_position = screen_values["end_position_mm"]
-            step_size = screen_values["step_size_mm"]
-            estimated_duration = core_logic.request_time_constant(start_position, end_position, step_size)
+        # For each leg parameters we estimate and accumulate it's duration
+        try:
+            # First get parameters from screen and verify they are valid
+            valid_parameters, screen_values = get_parse_validate_screen_params(leg_parameters, entries)
 
-            estimation_message = ""
-            # When estimated duration is below 1 min we give an estimation in seconds
-            # to make it more readable
-            if estimated_duration < 60:
-                estimation_message = str(estimated_duration) + " seconds"
+            if valid_parameters:
 
-            # Readability for experiments below an hour
-            elif estimated_duration < 60*60:
-                estimated_duration_mins = int(estimated_duration / 60)
-                estimated_duration_secs = int(estimated_duration % 60)
-
-                estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds"
-
-            # Experiments below a day
-            elif estimated_duration < 60*60*24:
-                estimated_duration_hours = int(estimated_duration / (60*60))
-                estimated_duration_mins = int(estimated_duration % (60*60))
-                #estimated_duration_secs = int(estimated_duration % 60)
-
-                estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
+                start_position = screen_values["start_position_mm"]
+                end_position = screen_values["end_position_mm"]
+                step_size = screen_values["step_size_mm"]
+                estimated_duration += core_logic.request_time_constant(start_position, end_position, step_size)
             
+            if not valid_parameters:
+                return
 
-            messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
-        
-        if not valid_parameters:
-            return
+        # Wrap up user friendly errors into 
+        except NameError as error_message:
 
-    # Wrap up user friendly errors into 
-    except NameError as error_message:
+            # Case where the user has attempted to estimate without connecting to the lockin
+            if "adapter" in str(error_message):
+                messagebox.showinfo("Could not estimate timespan", "Please start device intialization before estimating time.")
+                return
+    
 
-        # Case where the user has attempted to estimate without connecting to the lockin
-        if "adapter" in str(error_message):
-            messagebox.showinfo("Could not estimate timespan", "Please start device intialization before estimating time.")
+    # At the end of the estimation we create a message for the user
+    estimation_message = ""
+
+    # When estimated duration is below 1 min we give an estimation in seconds
+    # to make it more readable
+    if estimated_duration < 60:
+        estimation_message = str(estimated_duration) + " seconds"
+
+    # Readability for experiments below an hour
+    elif estimated_duration < 60*60:
+        estimated_duration_mins = int(estimated_duration / 60)
+        estimated_duration_secs = int(estimated_duration % 60)
+
+        estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds"
+
+    # Experiments below a day
+    elif estimated_duration < 60*60*24:
+        estimated_duration_hours = int(estimated_duration / (60*60))
+        estimated_duration_mins = int(estimated_duration % (60*60))
+        #estimated_duration_secs = int(estimated_duration % 60)
+
+        estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
+    
+
+    messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
 
 
 
@@ -500,7 +512,11 @@ def create_experiment_gui_from_dict(parameters_dict):
     time_constant = parameters_dict["time_constant"]
     trip_legs = parameters_dict["trip_legs"]
 
-    experiment_parameters_frame = Screens["Experiment screen"]["Screen frame"]
+    experiment_parameters_frame = Screens["Experiment screen"]["Child frame"]
+
+    # Erase previous screen
+    for widget in experiment_parameters_frame.winfo_children():
+        widget.destroy()
 
     row_num = 1
     label = tk.Label(experiment_parameters_frame, text="Please input experiment parameters", anchor="w")
@@ -513,7 +529,7 @@ def create_experiment_gui_from_dict(parameters_dict):
     entries = {}
 
     # First we start with the entries that are not iterable (this snippet is not
-    # readable, please refer to the for loop below for comments)
+    # very readable, please refer to the for loop below for comments)
     label = tk.Label(experiment_parameters_frame, text="experiment file name", anchor="w")
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     entry = tk.Entry(experiment_parameters_frame)
@@ -539,7 +555,7 @@ def create_experiment_gui_from_dict(parameters_dict):
     for leg_number, leg_parameters in trip_legs.items():
 
         # For starters we keep the parameters for each leg into their own buffer dict
-        trip_leg = {}
+        trip_leg_entry = {}
 
         # Label at the start the number for the leg
         label = tk.Label(experiment_parameters_frame, text=f"leg number {leg_number}", anchor="w")
@@ -561,19 +577,22 @@ def create_experiment_gui_from_dict(parameters_dict):
             entry.insert(0, str(default_value))
             
             # Store entries on a different dict to read their screen values later
-            trip_leg[parameter] = entry
+            trip_leg_entry[parameter] = entry
 
             # Following labels and entry boxes will be written a row below
             row_num += 1
         
         # At the end of drawing and with all of the widgets for a certain leg retrieved 
         # we store the buffer dict into the dict holding all of the trips with it's appopiate key
-        trip_legs_entries[leg_number] = trip_leg
+        trip_legs_entries[leg_number] = trip_leg_entry
     
     # And at the end of the loop we append all of the trips to the main entries dict
     entries["trip_legs"] = trip_legs_entries
+    
 
-    show_screen(screen_name="Experiment screen", frame_type="Child frame")
+    # Show frames at the end
+    experiment_parameters_frame.grid(row=2, column=0, sticky="ew")
+    
 
 
 
@@ -648,8 +667,11 @@ def GUI():
     # We create a frame that will contain everything under this screen, this frame will
     # be shown or hidden depending on what screen we want to display
     Initialization_screen = tk.Frame(main_window)
-    Initialization_screen.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
-    main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
+    
+    Initialization_screen.grid(row=2, column=0, padx=10, pady=10)#, sticky="ew")
+    third_label = tk.Label(Initialization_screen, text="Third row label Child", anchor="w")
+    third_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        
 
     Screens["Initialization screen"] = {}
     Screens["Initialization screen"]["Screen frame"] = Initialization_screen
@@ -658,7 +680,8 @@ def GUI():
 
     # Add text (label) prompting user to introduce configuration parameters
     label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
-
+    label.grid(row=0, column=0, padx=10, pady=5)#, sticky="w")
+    
     # The widgets will be placed in a grid with respect to each other,
     # to define their separation we define a "no place" x and y pad radius measured 10px around them
     # finally we specify "w" to format them to the left or west of their "cell"
@@ -710,8 +733,8 @@ def GUI():
     spacer = tk.Label(delay_parameters_frame, text="")  # An empty label
     spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
 
-
-
+    
+    
     ############################### Frame for lockin ###############################
     # Repeat for lockin parameters
     lockin_parameters_frame = tk.Frame(Initialization_screen)
@@ -744,6 +767,7 @@ def GUI():
     button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 
 
+    
 
     ################################### Experiment Configuration Screen #########################
     # This screen holds the parameters to configure the experiment and visualize it
@@ -771,7 +795,7 @@ def GUI():
     # Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
     button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
     button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
-
+    
     '''
     # This button launches a scan
     with open('Utils\experiment_preset.json', "r") as json_file:
@@ -785,33 +809,38 @@ def GUI():
                                                                                         screen_values["end_position_mm"], 
                                                                                         screen_values["step_size_mm"]))
     button.grid(row=3, column=2, padx=10, pady=5, sticky="w")
+    '''
 
 
     # Inform user of expected experiment time before launching experiment
     button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=partial(estimate_experiment_timespan,
-                                                                                        leg_parameters, 
-                                                                                        entries, 
-                                                                                        screen_values["start_position_mm"],
-                                                                                        screen_values["end_position_mm"], 
-                                                                                        screen_values["step_size_mm"]))
+                                                                                        experiment_preset, 
+                                                                                        entries))
     button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
-    '''
     ################################### Top bar ###################################
+    
     # Drop down menu to select different screens
     menu_var = tk.StringVar(value="Initialization screen")  # Default value
     screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
-    screen_menu.grid(row=1, column=0, padx=0, pady=0, sticky="w")
+    screen_menu.grid(row=0, column=0, padx=0, pady=0, sticky="w")
 
     # Add a horizontal line (separator) below the dropdown menu
     separator = ttk.Separator(main_window, orient="horizontal")
-    separator.grid(row=2, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
-
+    separator.grid(row=1, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
+    
     # Run first to show default screen when loading
-    show_screen(screen_name="Initialization screen", frame_type="Screen frame")    
+    show_screen(screen_name="Initialization screen", frame_type="Screen frame")
+
+    # Ensure row 0 and row 1 stay fixed
+    main_window.grid_rowconfigure(0, weight=0)
+    main_window.grid_rowconfigure(1, weight=0)
+
+    # Ensure row 2 (Initialization_screen) expands properly
+    main_window.grid_rowconfigure(2, weight=0)
+    main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
 
     # Call the main window to draw the GUI
-
     main_window.mainloop()
 
 
