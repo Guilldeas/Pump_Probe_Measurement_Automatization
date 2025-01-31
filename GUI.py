@@ -38,19 +38,50 @@ from tkinter import simpledialog
 # allows the user to configure the experiment while the 
 # initialization is taking place
 initialized = False
+entries = {}
+
+
+def show_screen_from_menu(screen_name):
+    """ Wrapper function to use `show_screen` inside OptionMenu """
+    show_screen(screen_name, "Screen frame")  # Default to showing the main screen frame
 
 
 
-def show_screen(screen_name):
-    """
-    Switch to the selected screen.
-    """
-    # Hide all frames
-    for frame in Screens.values():
-        frame.pack_forget()
-    
+
+def show_screen(screen_name, frame_type):
+    # This funciton switches between frames, this could be a
+    # switch between screens, specificaly to screen "screen_name" 
+    # or between frames on a screen, to specify this we use the
+    # variable "frame_type". These are really just keys on the 
+    # following dict storing references to these frames
+    #
+    # The data structure for the Screens dict is as follows:
+    #
+    # Screens = {
+    #     "Initialization screen": {
+    #         "Screen frame": "Init_parent_frame",
+    #         "Child frame": {}
+    #         },
+    # 
+    #     "Experiment screen": {
+    #         "Screen frame": "Exper_parent_frame", 
+    #         "Child frame": "Exper_child_frame"
+    #         }
+    # }
+
+
+    for _, frames in Screens.items():
+
+        # Skip erasing child frames that dont exist
+        if frames[frame_type] == None:
+            continue
+
+        # Whipe out the GUI by erasing all screen frames
+        # which also erases all child frames
+        frames[frame_type].grid_forget()
+
     # Show the selected frame
-    Screens[screen_name].pack(fill="both", expand=True)
+    Screens[screen_name][frame_type].grid(row=0, column=0, sticky="nsew")
 
 
 
@@ -129,15 +160,23 @@ def initialize_button():
 
     # Create a Listbox to display initialization messages
     listbox = tk.Listbox(waiting_window, selectmode=tk.SINGLE, height=15)
-    listbox.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
     scrollbar = tk.Scrollbar(waiting_window, orient=tk.VERTICAL)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # Place Listbox and Scrollbar using grid()
+    listbox.grid(row=0, column=0, sticky="nsew")  # Expand in all directions
+    scrollbar.grid(row=0, column=1, sticky="ns")  # Stretch only vertically
+
+    # Configure the scrollbar
     listbox.config(yscrollcommand=scrollbar.set)
     scrollbar.config(command=listbox.yview)
 
+    # Configure the parent (waiting_window) to allow expansion
+    waiting_window.grid_rowconfigure(0, weight=1)  # Allow row 0 to expand
+    waiting_window.grid_columnconfigure(0, weight=1)  # Allow column 0 to expand (Listbox)
+
     # Add a label to inform the user
     label = tk.Label(waiting_window, text="Please wait while the devices are initialized...")
-    label.pack(pady=20, padx=20)
+    label.grid(row=1, column=0, padx=20, pady=20, sticky="n")
 
     # Queue for communication between threads
     output_queue = Queue()
@@ -168,7 +207,7 @@ def initialize_button():
 
             # Add button to close window
             button = tk.Button(waiting_window, text="Ok", command=partial(close_window, waiting_window))
-            button.pack(side="bottom", padx=20, pady=20)
+            button.button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
 
     # Start checking for updates
     #check_for_updates(output_queue, listbox, initialization_thread, waiting_window, label)
@@ -251,7 +290,7 @@ def get_parse_validate_screen_params(default_values, entries_widgets):
     # Note: The get method returns all values as strings so we'll 
     # have to parse them later
     screen_values = {}
-    for parameter_name, _ in default_values.items():
+    for parameter_name, _ in entries_widgets.items():
 
         # Each entry is read with get from the widgets stored in 
         # the entries dict, this dict was constructed wth the same
@@ -286,15 +325,16 @@ def get_parse_validate_screen_params(default_values, entries_widgets):
 
 
 
-def save_parameters(experiment_preset, entries_widgets):
+def save_parameters(experiment_preset):
     
     trip_legs = experiment_preset["trip_legs"]
 
     # We create empty presets to store parameters after validation
-    trip_legs_entries = entries_widgets["trip_legs"]
+    trip_legs_entries = entries["trip_legs"]
     experiment_preset_save = {}
     trip_legs_save = {}
-    for leg_number, leg_parameters in trip_legs.items():
+    #for leg_number, leg_parameters in trip_legs.items():
+    for leg_number, leg_parameters in trip_legs_entries.items():
         valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters, trip_legs_entries[leg_number])
     
         # If any of the parameters is not valid we return
@@ -305,8 +345,8 @@ def save_parameters(experiment_preset, entries_widgets):
         trip_legs_save[leg_number] = screen_parameters
     
     # Finally we construct a dict to save it by getting the parameters from screen that don't need to save the validated
-    experiment_preset_save["experiment_name"] = entries_widgets["experiment_name"].get()
-    experiment_preset_save["time_constant"] = entries_widgets["time_constant"].get()
+    experiment_preset_save["experiment_name"] = entries["experiment_name"].get()
+    experiment_preset_save["time_constant"] = entries["time_constant"].get()
     experiment_preset_save["trip_legs"] = trip_legs_save
     
     # After all tests have passed we save them into a json
@@ -346,15 +386,23 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
 
             # Create a Listbox to display initialization messages
             listbox = tk.Listbox(monitoring_window, selectmode=tk.SINGLE, height=15)
-            listbox.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
             scrollbar = tk.Scrollbar(monitoring_window, orient=tk.VERTICAL)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            # Place widgets using grid
+            listbox.grid(row=0, column=0, sticky="nsew")
+            scrollbar.grid(row=0, column=1, sticky="ns")
+
+            # Configure scrollbar
             listbox.config(yscrollcommand=scrollbar.set)
             scrollbar.config(command=listbox.yview)
 
+            # Ensure resizing
+            monitoring_window.grid_rowconfigure(0, weight=1)
+            monitoring_window.grid_columnconfigure(0, weight=1)
+
             # Add a label to inform the user
             label = tk.Label(monitoring_window, text="Please wait while the experiment takes place...")
-            label.pack(pady=20, padx=20)
+            label.grid(padx=20, pady=20)
 
             # Queue for communication between threads
             output_queue = Queue()
@@ -382,7 +430,7 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
 
                     # Add button to close window
                     button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
-                    button.pack(side="bottom", padx=20, pady=20)
+                    button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
 
             # Start checking for updates
             #check_for_updates(output_queue, listbox, initialization_thread, waiting_window, label)
@@ -432,7 +480,7 @@ def estimate_experiment_timespan(leg_parameters, entries, start_position, end_po
                 estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
             
 
-            messagebox.showinfo("Estimation", f"Exeriment is estimated to take {estimation_message}")
+            messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
         
         if not valid_parameters:
             return
@@ -446,28 +494,13 @@ def estimate_experiment_timespan(leg_parameters, entries, start_position, end_po
 
 
 
-def create_experiment_gui_from_dict(Experiment_Frame, Entries_Frame, experiment_preset, overwrite_screen=False):
+def create_experiment_gui_from_dict(parameters_dict):
 
-    if overwrite_screen:
+    experiment_name = parameters_dict["experiment_name"]
+    time_constant = parameters_dict["time_constant"]
+    trip_legs = parameters_dict["trip_legs"]
 
-        # If something was drawn before we need to delete it first
-        Entries_frame.pack_forget()
-
-        # And then create a new frame with the same name for 
-        # reference when switching screens
-        Entries_frame = tk.Frame(Experiment_Frame)
-        Screens["Experiment screen"] = Entries_frame
-
-        Entries_frame.pack()
-
-
-    experiment_name = experiment_preset["experiment_name"]
-    time_constant = experiment_preset["time_constant"]
-    trip_legs = experiment_preset["trip_legs"]
-
-    # Create frame for input parameters
-    experiment_parameters_frame = tk.Frame(Entries_Frame)
-    experiment_parameters_frame.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+    experiment_parameters_frame = Screens["Experiment screen"]["Screen frame"]
 
     row_num = 1
     label = tk.Label(experiment_parameters_frame, text="Please input experiment parameters", anchor="w")
@@ -476,6 +509,7 @@ def create_experiment_gui_from_dict(Experiment_Frame, Entries_Frame, experiment_
 
     # We will create a dict with an equal structure to our json, under the same keys we'll store 
     # the widgets for the entries, that is a way to get values from the screen
+    global entries
     entries = {}
 
     # First we start with the entries that are not iterable (this snippet is not
@@ -539,17 +573,17 @@ def create_experiment_gui_from_dict(Experiment_Frame, Entries_Frame, experiment_
     # And at the end of the loop we append all of the trips to the main entries dict
     entries["trip_legs"] = trip_legs_entries
 
-    return entries
+    show_screen(screen_name="Experiment screen", frame_type="Child frame")
 
 
 
-def edit_trip_legs(Experiment_Frame, Entries_frame):
+def edit_trip_legs():
 
     # We first ask the user to input number of legs in the trip
     num_legs = int(simpledialog.askstring("Input", "Please enter number of legs in the trip:"))
 
     # We then construct a dict from which to construct the GUI later holding placeholder values
-    new_experiment_dict = {"experiment_name": "new_experiment","time_constant": "1"}
+    new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": "1"}
     
     # We now append as many trip legs as requested
     new_legs = {}
@@ -558,12 +592,14 @@ def edit_trip_legs(Experiment_Frame, Entries_frame):
 
     new_experiment_dict["trip_legs"] = new_legs
 
+    # PERHAPS WE NEED TO CREATE A NEW ENTRIES FRAME HERE
+
     # And proceed to construct a new frame with the placeholder data, passing these arguments deletes
-    # the previously drawn frame
-    create_experiment_gui_from_dict(Experiment_Frame, Entries_frame, new_experiment_dict,  overwrite_screen=True)
+    # the previously drawn frame Entries_Frame, experiment_preset
+    create_experiment_gui_from_dict(new_experiment_dict)
 
 
-
+# GRID ABSOLUTELY REFUSES TO WORK. FUCKING CHANGE THESE FUCKING FRAMES TO EVERYTHING BEING INSIDE THE SAME FRAME AND FYUCK THIS FUCKING GARBARGE!ª!!!!!w
 def GUI():
     
     # Extract default configuration values for both devices from the configuration file
@@ -582,24 +618,48 @@ def GUI():
     main_window.title("Automatic Pump Probe")
     main_window.geometry("1024x768")
 
-    # There are different screens (dramfes) in this GUI, each serves a different funciton 
+    # There are different screens (frames) in this GUI, each serves a different function 
     # and must display different frames to change between them we must store them into a
     # dict after building them
     global Screens 
     Screens = {}
-
+    # The data structure for the Screens dict is as follows:
+    #
+    # Screens = {
+    #     "Initialization screen": {
+    #         "Screen Frame": "Init_parent_frame",
+    #         "Child frames": {}
+    #         },
+    # 
+    #     "Experiment screen": {
+    #         "Screen Frame": "Exper_parent_frame", 
+    #         "Child frame": "Exper_child_frame_1"
+    #         }
+    # }
+    #
+    # Screens on the GUI are drawn with frames and stored as parent frames, these 
+    # need to be erased and drawn whenever the user changes screens so we need to 
+    # keep track of them in this dict, however sometimes the user will edit the 
+    # number of entries on the screen and we'll need to erase and redraw only certain 
+    # parts of the screen so we'll also keep these child frames on a child dict
 
 
     ################################### Initialization Screen #########################
     # We create a frame that will contain everything under this screen, this frame will
     # be shown or hidden depending on what screen we want to display
     Initialization_screen = tk.Frame(main_window)
-    Screens["Initialization screen"] = Initialization_screen
+    Initialization_screen.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
+    main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
+
+    Screens["Initialization screen"] = {}
+    Screens["Initialization screen"]["Screen frame"] = Initialization_screen
+    Screens["Initialization screen"]["Child frame"] = None
+
 
     # Add text (label) prompting user to introduce configuration parameters
     label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
 
-    # The widgets will be placed in a grid with respect each other,
+    # The widgets will be placed in a grid with respect to each other,
     # to define their separation we define a "no place" x and y pad radius measured 10px around them
     # finally we specify "w" to format them to the left or west of their "cell"
     row_num = 0
@@ -620,7 +680,7 @@ def GUI():
 
     # We place the frame indexing it to the initialization screen frame
     delay_parameters_frame = tk.Frame(Initialization_screen)
-    delay_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+    delay_parameters_frame.grid(row=0, column=0, padx=10, pady=10, sticky="w")
 
     row_num = 0
     label = tk.Label(delay_parameters_frame,  # Instead of placing the widget in the main window we now place it on the frame
@@ -655,7 +715,7 @@ def GUI():
     ############################### Frame for lockin ###############################
     # Repeat for lockin parameters
     lockin_parameters_frame = tk.Frame(Initialization_screen)
-    lockin_parameters_frame.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+    lockin_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
 
     row_num = 0
     label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
@@ -688,7 +748,8 @@ def GUI():
     ################################### Experiment Configuration Screen #########################
     # This screen holds the parameters to configure the experiment and visualize it
     Experiment_screen = tk.Frame(main_window)
-    Screens["Experiment screen"] = Experiment_screen
+    Screens["Experiment screen"] = {}
+    Screens["Experiment screen"]["Screen frame"] = Experiment_screen
 
     # Load experiment configuration parameters
     with open('Utils\experiment_preset.json', "r") as json_file:
@@ -696,18 +757,20 @@ def GUI():
 
     # Create a frame for the entries alone so we can overwrite them when the user decides to add legs to the trip
     Entries_frame = tk.Frame(Experiment_screen)
-    Screens["Experiment screen entries"] = Entries_frame
+
+    # We store this frame as a child frame of the Experiment screen frame
+    Screens["Experiment screen"]["Child frame"] = Entries_frame
 
     # Initially we draw the GUI for the input loaded from the experiment preset into a dict
-    entries = create_experiment_gui_from_dict(Experiment_screen, Entries_frame, experiment_preset)
+    create_experiment_gui_from_dict(experiment_preset)
 
     # We now ask the user if they want to edit the number of legs on the trip
-    button = tk.Button(Experiment_screen, text="Edit number of trip legs", command=partial(edit_trip_legs, Experiment_screen, Entries_frame))
-    button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+    button = tk.Button(Experiment_screen, text="Edit number of trip legs", command=edit_trip_legs)
+    button.grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
     # Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
-    button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset, entries))
-    button.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+    button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
+    button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
     '''
     # This button launches a scan
@@ -737,19 +800,18 @@ def GUI():
     ################################### Top bar ###################################
     # Drop down menu to select different screens
     menu_var = tk.StringVar(value="Initialization screen")  # Default value
-    screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen)
-    screen_menu.pack(side="top", anchor="w", padx=0, pady=0)
+    screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
+    screen_menu.grid(row=1, column=0, padx=0, pady=0, sticky="w")
 
     # Add a horizontal line (separator) below the dropdown menu
     separator = ttk.Separator(main_window, orient="horizontal")
-    separator.pack(fill="x", padx=0, pady=0)  # Fill horizontally, with padding
+    separator.grid(row=2, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
 
-
-
-
+    # Run first to show default screen when loading
+    show_screen(screen_name="Initialization screen", frame_type="Screen frame")    
 
     # Call the main window to draw the GUI
-    show_screen("Initialization screen")    # Run first to show default screen when loading
+
     main_window.mainloop()
 
 
