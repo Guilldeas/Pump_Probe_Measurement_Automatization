@@ -9,7 +9,7 @@ import threading
 import sys
 from queue import Queue
 from functools import partial
-from math import floor
+from math import floor, ceil
 from tkinter import simpledialog
 
 
@@ -126,8 +126,8 @@ def initialization_thread_logic():
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.initialization(Troubleshooting=False)
-        core_logic.initialization_dummy(Troubleshooting=False)
+        core_logic.initialization(Troubleshooting=False)
+        #core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -140,8 +140,8 @@ def experiment_thread_logic(start_position, end_position, step_size):
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.perform_experiment(start_position, end_position, step_size)
-        core_logic.initialization_dummy(Troubleshooting=False)
+        core_logic.perform_experiment(start_position, end_position, step_size)
+        #core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -209,7 +209,7 @@ def initialize_button():
             # IDK why this button does not show in the GUI but since it does the same as manually closing the window
             # I'll ignore it for now (probably forever if you are reading this)
             button = tk.Button(waiting_window, text="Ok", command=partial(close_window, waiting_window))
-            button.button.grid(row=1, column=1, padx=20, pady=20, sticky="s")
+            button.grid(row=1, column=1, padx=20, pady=20, sticky="s")
 
     # Start checking for updates
     #check_for_updates(output_queue, listbox, initialization_thread, waiting_window, label)
@@ -279,7 +279,7 @@ def is_value_valid(parameter_name, parameter_value, parameter_rules):
 
 
 
-def get_parse_validate_screen_params(default_values, entries_widgets):
+def get_parse_validate_screen_params(entries_widgets):
     '''
     This function gets user values from entries on the screen into a new 
     temporary dict with the same structure as the one holding the 
@@ -337,7 +337,7 @@ def save_parameters(experiment_preset):
     trip_legs_save = {}
     #for leg_number, leg_parameters in trip_legs.items():
     for leg_number, leg_parameters in trip_legs_entries.items():
-        valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters, trip_legs_entries[leg_number])
+        valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters)#, trip_legs_entries[leg_number])
     
         # If any of the parameters is not valid we return
         if not valid_parameters:
@@ -447,35 +447,37 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
 
 
 
-def estimate_experiment_timespan(legs_dict, entries):
+def estimate_experiment_timespan(entries):
 
-    estimated_duration = None
+    Legs_entries = entries["trip_legs"]
+    time_constant = float(entries["time_constant"].get())
+
+    estimated_duration = 0
 
     # Iterate through dict containing all trip legs
-    for leg_parameters in legs_dict.values():
+    for leg_entries in Legs_entries.values():
 
         # For each leg parameters we estimate and accumulate it's duration
-        try:
-            # First get parameters from screen and verify they are valid
-            valid_parameters, screen_values = get_parse_validate_screen_params(leg_parameters, entries)
+        # First get parameters from screen and verify they are valid
+        valid_parameters, screen_values = get_parse_validate_screen_params(leg_entries)
 
-            if valid_parameters:
+        if valid_parameters:
 
-                start_position = screen_values["start_position_mm"]
-                end_position = screen_values["end_position_mm"]
-                step_size = screen_values["step_size_mm"]
-                estimated_duration += core_logic.request_time_constant(start_position, end_position, step_size)
-            
-            if not valid_parameters:
-                return
+            # Get the relevant parameters
+            start_position = screen_values["start_position_mm"]
+            end_position = screen_values["end_position_mm"]
+            step_size = screen_values["step_size_mm"]
 
-        # Wrap up user friendly errors into 
-        except NameError as error_message:
+            #time_constant = 1
+            settling_time = 5 * time_constant
+            average_step_duration_sec = 0.5 + settling_time
+            num_steps = ceil( (end_position - start_position) / step_size )
 
-            # Case where the user has attempted to estimate without connecting to the lockin
-            if "adapter" in str(error_message):
-                messagebox.showinfo("Could not estimate timespan", "Please start device intialization before estimating time.")
-                return
+            estimated_duration += int(average_step_duration_sec * num_steps )
+        
+        if not valid_parameters:
+            return
+
     
 
     # At the end of the estimation we create a message for the user
@@ -497,9 +499,16 @@ def estimate_experiment_timespan(legs_dict, entries):
     elif estimated_duration < 60*60*24:
         estimated_duration_hours = int(estimated_duration / (60*60))
         estimated_duration_mins = int(estimated_duration % (60*60))
-        #estimated_duration_secs = int(estimated_duration % 60)
 
         estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
+    
+    # Experiments above
+    elif estimated_duration >= 60*60*24:
+        estimated_duration_days = int(estimated_duration / (60*60*24))
+
+        estimation_message = f"above {estimated_duration_days} days... Don't you think you are pushing it just a little?"
+    
+    
     
 
     messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
@@ -813,13 +822,12 @@ def GUI():
 
 
     # Inform user of expected experiment time before launching experiment
-    button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=partial(estimate_experiment_timespan,
-                                                                                        experiment_preset, 
-                                                                                        entries))
+    button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=partial(estimate_experiment_timespan, entries))
     button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
-    ################################### Top bar ###################################
-    
+
+
+    ################################### Top bar ###################################    
     # Drop down menu to select different screens
     menu_var = tk.StringVar(value="Initialization screen")  # Default value
     screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
