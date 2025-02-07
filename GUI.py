@@ -126,8 +126,8 @@ def initialization_thread_logic():
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.initialization(Troubleshooting=False)
-        #core_logic.initialization_dummy(Troubleshooting=False)
+        #core_logic.initialization(Troubleshooting=False)
+        core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -140,8 +140,8 @@ def experiment_thread_logic(start_position, end_position, step_size):
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.perform_experiment(start_position, end_position, step_size)
-        #core_logic.initialization_dummy(Troubleshooting=False)
+        #core_logic.perform_experiment(start_position, end_position, step_size)
+        core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -447,7 +447,7 @@ def launch_experiment(default_values, entries_widgets, start_position, end_posit
 
 
 
-def estimate_experiment_timespan(entries):
+def estimate_experiment_timespan():
 
     Legs_entries = entries["trip_legs"]
     time_constant = float(entries["time_constant"].get())
@@ -478,7 +478,6 @@ def estimate_experiment_timespan(entries):
         if not valid_parameters:
             return
 
-    
 
     # At the end of the estimation we create a message for the user
     estimation_message = ""
@@ -498,7 +497,7 @@ def estimate_experiment_timespan(entries):
     # Experiments below a day
     elif estimated_duration < 60*60*24:
         estimated_duration_hours = int(estimated_duration / (60*60))
-        estimated_duration_mins = int(estimated_duration % (60*60))
+        estimated_duration_mins = int((estimated_duration % (60*60))/60)
 
         estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
     
@@ -619,8 +618,6 @@ def edit_trip_legs():
         new_legs[str(leg_number)] = {"start_position_mm": 0.0, "end_position_mm": 0.0, "step_size_mm": 0.0}
 
     new_experiment_dict["trip_legs"] = new_legs
-
-    # PERHAPS WE NEED TO CREATE A NEW ENTRIES FRAME HERE
 
     # And proceed to construct a new frame with the placeholder data, passing these arguments deletes
     # the previously drawn frame Entries_Frame, experiment_preset
@@ -822,7 +819,7 @@ def GUI():
 
 
     # Inform user of expected experiment time before launching experiment
-    button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=partial(estimate_experiment_timespan, entries))
+    button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=estimate_experiment_timespan)
     button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
 
@@ -859,15 +856,6 @@ def GUI():
 ############################### Divide program in threads ###############################
 # If we try to run the core logic functions to manage the experiment along the GUI 
 # functions we won't be able to do it simultaneously unless we divide them into threads
-
-
-
-experiment_thread = threading.Thread(
-    target=core_logic.perform_experiment_dummy,
-    args=(),
-    kwargs={"Troubleshooting": False}
-)
-
 GUI_thread = threading.Thread(target=GUI)
 
 # Start the main window thread to draw the GUI
