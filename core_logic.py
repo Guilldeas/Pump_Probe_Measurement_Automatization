@@ -312,49 +312,64 @@ def request_time_constant(start_position, end_position, step_size):
     
     
 
-def perform_experiment(start_position, end_position, step_size, experiment_title, time_constant):
+def perform_experiment(parameters_dict):
+
+    # The input dict contains information for each leg of the trip
+    time_constant = parameters_dict["time_constant"]
+
+    # Prepare lockin for experiment
+    clfun.autorange(adapter)
+    clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
+    clfun.set_time_constant(adapter, time_constant)
+    settling_time = 5 * time_constant
+
+
 
     ########################### Build scan positions list ###########################
 
-    # Create a list to store both positions to scan and rms voltages measured
+    # Create a list of positions where the delay stage will move through
     Positions = []
-    Position_within_limtis = True
 
-    # Edge case: First position is computed outside the loop
-    new_position = start_position
+    # Add values to the list for every leg
+    for leg_number, leg_parameters in parameters_dict["trip_legs"].items():
 
-    # Check that the new computed position is whithin stage travel limits
-    if (start_position <= new_position <= end_position):
-        Positions.append(new_position)
+        # Extract scan parameters for each leg
+        start_position = leg_parameters["start_position_mm"]
+        end_position = leg_parameters["end_position_mm"]
+        step_size = leg_parameters["step_size_mm"]
 
-    # Following positions will be computed on the loop
-    while(Position_within_limtis):
+        Position_within_limtis = True
 
-        new_position = new_position + step_size
+        # Edge case: First position is computed outside the loop
+        new_position = start_position
 
         # Check that the new computed position is whithin stage travel limits
         if (start_position <= new_position <= end_position):
             Positions.append(new_position)
-        
-        # If not within limits then we stop adding new steps
-        else:
-            Position_within_limtis = False
 
-            # Add end position if not in list already
-            if (end_position not in Positions):
-                Positions.append(end_position)
+        # Following positions will be computed on the loop
+        while(Position_within_limtis):
 
+            new_position = new_position + step_size
+
+            # Check that the new computed position is whithin stage travel limits
+            if (start_position <= new_position <= end_position):
+                Positions.append(new_position)
+            
+            # If not within limits then we stop adding new steps
+            else:
+                Position_within_limtis = False
+
+                # Add end position if not in list already
+                if (end_position not in Positions):
+                    Positions.append(end_position)
+
+    # Finally we create an empty array to hold the captured data for each position
     Data = np.zeros_like(np.array(Positions))
 
 
 
     ########################### Scan and Measure at list of positions ###########################
-    clfun.autorange(adapter)
-    clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
-
-    # Wait for filter settling
-    time_constant = clfun.request_time_constant(adapter)
-    settling_time = 5 * time_constant
 
     for index in range(0, len(Positions)):
 
@@ -438,28 +453,3 @@ def close_devices(Troubleshooting):
     clfun.close_connection(adapter)
     print("Succesfully closed connection to lockin")
             
-
-'''def main(Troubleshooting=False):
-
-    initialization(Troubleshooting)
-    perform_experiment(Troubleshooting)
-
-main()'''
-
-'''
-########################### Parse variables passed from terminal by user ###########################
-
-if __name__ == "__main__":
-    # Create an argument parser
-    parser = argparse.ArgumentParser(description="Run the experiment with specified parameters.")
-
-    # Add arguments for configuration variables
-    parser.add_argument("--Troubleshooting", type=bool, default=False, help="Choose whether to get a step by step verification of the C_API functions that passed (default: False)")
-
-
-    # Parse arguments from the command line
-    args = parser.parse_args()
-
-    # Pass the arguments to the experiment function
-    main(args.Troubleshooting)
-'''

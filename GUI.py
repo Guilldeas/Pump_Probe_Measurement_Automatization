@@ -14,8 +14,6 @@ from tkinter import simpledialog
 
 
 # TO DO list: From most to least important
-#   · Implement a way to add multiple legs to the trip
-#   · Implement time constant
 #   · Implement a way to save data and safely closing the program
 #   · Change from mm to fs or whatever
 #   · Show graph on screen as experiment takes place (error bars?)
@@ -24,7 +22,6 @@ from tkinter import simpledialog
 #   · If OVERLOAD then AUTOGAIN else proceed
 #   · Add minimum requirement for step length (look how small can it be on the delay stage docs)
 #   · Add minimum requirement for step length (look how small can it be on the delay stage docs)
-#   · Implement a way to change, gain or whatever may affect each leg
 #   · Add comment header to CSV
 #   · Implement loading different experiment presets, right now there only one, default, and the 
 #     user overwrites it to save a preset.
@@ -126,8 +123,8 @@ def initialization_thread_logic():
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.initialization(Troubleshooting=False)
-        core_logic.initialization_dummy(Troubleshooting=False)
+        core_logic.initialization(Troubleshooting=False)
+        #core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -135,13 +132,13 @@ def initialization_thread_logic():
 
 
 
-def experiment_thread_logic(start_position, end_position, step_size):
+def experiment_thread_logic(parameters_dict):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.perform_experiment(start_position, end_position, step_size)
-        core_logic.initialization_dummy(Troubleshooting=False)
+        core_logic.perform_experiment(parameters_dict)
+        #core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -337,7 +334,7 @@ def save_parameters(experiment_preset):
     trip_legs_save = {}
     #for leg_number, leg_parameters in trip_legs.items():
     for leg_number, leg_parameters in trip_legs_entries.items():
-        valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters)#, trip_legs_entries[leg_number])
+        valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters)
     
         # If any of the parameters is not valid we return
         if not valid_parameters:
@@ -360,90 +357,108 @@ def save_parameters(experiment_preset):
 
 
 
-def launch_experiment(default_values, entries_widgets, start_position, end_position, step_size):
+def launch_experiment(entries_widgets):
 
     if not initialized:
         messagebox.showinfo("Error launching experiment", "Please wait for device initialization to complete before launching experiment")
         return
 
-    # Verify parameters are safe before launching the experiment
-    valid_parameters, screen_values = get_parse_validate_screen_params(default_values, entries_widgets)
-
-    if valid_parameters:
-
-        # Extract correctly parsed and verified parameters into variables
-        start_position = screen_values["start_position_mm"]
-        end_position = screen_values["end_position_mm"]
-        step_size = screen_values["step_size_mm"]
-
-        # Catch exceptions while performing the experiment 
-        try:
-
-            # Create a window to monitor experiment
-            monitoring_window = Toplevel(main_window)
-            monitoring_window.title("Experiment in progress")
-            monitoring_window.geometry("800x300")
-            monitoring_window.resizable(True, True)
-            monitoring_window.grab_set()  # Make it modal (blocks interaction with other windows)
-
-            # Create a Listbox to display initialization messages
-            listbox = tk.Listbox(monitoring_window, selectmode=tk.SINGLE, height=15)
-            scrollbar = tk.Scrollbar(monitoring_window, orient=tk.VERTICAL)
-
-            # Place widgets using grid
-            listbox.grid(row=0, column=0, sticky="ew")
-            scrollbar.grid(row=0, column=1, sticky="ns")
-
-            # Configure scrollbar
-            listbox.config(yscrollcommand=scrollbar.set)
-            scrollbar.config(command=listbox.yview)
-
-            # Ensure resizing
-            monitoring_window.grid_rowconfigure(0, weight=1)
-            monitoring_window.grid_columnconfigure(0, weight=1)
-
-            # Add a label to inform the user
-            label = tk.Label(monitoring_window, text="Please wait while the experiment takes place...")
-            label.grid(padx=20, pady=20)
-
-            # Queue for communication between threads
-            output_queue = Queue()
-
-            # Redirect stdout and stderr to the queue
-            capture_output(output_queue)
-
-            # Run experiment on a different thread
-            experiment_thread = threading.Thread(target=experiment_thread_logic, 
-                                                 args=(start_position, end_position, step_size))
-            experiment_thread.start()
-
-            # Function to check for updates from the queue
-            def check_for_updates():
-                while not output_queue.empty():
-                    new_message = output_queue.get()
-                    listbox.insert(tk.END, new_message)
-                    listbox.see(tk.END)  # Auto-scroll to the bottom
-
-                if experiment_thread.is_alive():
-                    monitoring_window.after(100, check_for_updates)
-                else:
-                    experiment_thread.join()
-                    label.config(text="Initialization Complete")
-
-                    # Add button to close window
-                    button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
-                    button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
-
-            # Start checking for updates
-            #check_for_updates(output_queue, listbox, initialization_thread, waiting_window, label)
-            check_for_updates()
-            
-
-        except Exception as e:
-            print(f"Error: {e}")  # Will be captured and displayed in GUI
+    # First we'll verify parameters are safe before launching the experiment
     
-    else:
-        return
+    # Extract references to data we wanna validate
+    Legs_entries = entries_widgets["trip_legs"]
+
+    # Construct a dict that will store the parsed verified data to later feed to the delay stage
+    experiment_parameters = {
+        "experiment_name": entries_widgets["experiment_name"].get(), 
+        "time_constant": float(entries_widgets["time_constant"].get())
+        }
+    
+    trip_legs_parsed = {}
+
+    # Validate and parse iteratively
+    for leg_number, leg_entries in Legs_entries.items():
+
+        # For each leg parameters we estimate and accumulate it's duration
+        # First get parameters from screen and verify they are valid
+        valid_parameters, parsed_values = get_parse_validate_screen_params(leg_entries)
+
+        if valid_parameters:
+            trip_legs_parsed[leg_number] = parsed_values
+        
+        else:
+            return
+    
+    experiment_parameters["trip_legs"] = trip_legs_parsed
+        
+    # Once parameters are verified and parsed we proceed with the experiment launch
+
+    # Catch exceptions while performing the experiment 
+    try:
+
+        # Create a window to monitor experiment
+        monitoring_window = Toplevel(main_window)
+        monitoring_window.title("Experiment in progress")
+        monitoring_window.geometry("800x300")
+        monitoring_window.resizable(True, True)
+        monitoring_window.grab_set()  # Make it modal (blocks interaction with other windows)
+
+        # Create a Listbox to display initialization messages
+        listbox = tk.Listbox(monitoring_window, selectmode=tk.SINGLE, height=15)
+        scrollbar = tk.Scrollbar(monitoring_window, orient=tk.VERTICAL)
+
+        # Place widgets using grid
+        listbox.grid(row=0, column=0, sticky="ew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # Configure scrollbar
+        listbox.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=listbox.yview)
+
+        # Ensure resizing
+        monitoring_window.grid_rowconfigure(0, weight=1)
+        monitoring_window.grid_columnconfigure(0, weight=1)
+
+        # Add a label to inform the user
+        label = tk.Label(monitoring_window, text="Please wait while the experiment takes place...")
+        label.grid(padx=20, pady=20)
+
+        # Queue for communication between threads
+        output_queue = Queue()
+
+        # Redirect stdout and stderr to the queue
+        capture_output(output_queue)
+
+        # Run experiment on a different thread
+        experiment_thread = threading.Thread(target=experiment_thread_logic, 
+                                                args=(experiment_parameters,))
+        experiment_thread.start()
+
+        # Function to check for updates from the queue
+        def check_for_updates():
+            while not output_queue.empty():
+                new_message = output_queue.get()
+                listbox.insert(tk.END, new_message)
+                listbox.see(tk.END)  # Auto-scroll to the bottom
+
+            if experiment_thread.is_alive():
+                monitoring_window.after(100, check_for_updates)
+            else:
+                experiment_thread.join()
+                label.config(text="Initialization Complete")
+
+                # Add button to close window
+                button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
+                button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
+
+        # Start checking for updates
+        #check_for_updates(output_queue, listbox, initialization_thread, waiting_window, label)
+        check_for_updates()
+        
+
+    except Exception as e:
+        print(f"Error: {e}")  # Will be captured and displayed in GUI
+
 
 
 
@@ -641,7 +656,7 @@ def GUI():
     global main_window
     main_window = tk.Tk()
     main_window.title("Automatic Pump Probe")
-    main_window.geometry("1024x768")
+    main_window.geometry("1920x1080")
 
     # There are different screens (frames) in this GUI, each serves a different function 
     # and must display different frames to change between them we must store them into a
@@ -801,25 +816,15 @@ def GUI():
     # Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
     button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
     button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
-    
-    '''
-    # This button launches a scan
-    with open('Utils\experiment_preset.json', "r") as json_file:
-        screen_values = json.load(json_file)
-    
-
-    button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment,
-                                                                                        leg_parameters, 
-                                                                                        entries, 
-                                                                                        screen_values["start_position_mm"],
-                                                                                        screen_values["end_position_mm"], 
-                                                                                        screen_values["step_size_mm"]))
-    button.grid(row=3, column=2, padx=10, pady=5, sticky="w")
-    '''
 
 
     # Inform user of expected experiment time before launching experiment
     button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=estimate_experiment_timespan)
+    button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
+
+
+    # This button launches a scan
+    button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, entries))
     button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
 
