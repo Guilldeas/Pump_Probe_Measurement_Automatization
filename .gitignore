@@ -6,3 +6,5 @@ srsinst.sr860/
 
 # Ignore all output files
 *.csv
+*.png
+*.xlsx

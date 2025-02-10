@@ -9,19 +9,22 @@ import threading
 import sys
 from queue import Queue
 from functools import partial
-from math import floor, ceil
+from math import ceil
 from tkinter import simpledialog
 
 
 # TO DO list: From most to least important
-#   · Implement a way to save data and safely closing the program
-#   · Change from mm to fs or whatever
 #   · Show graph on screen as experiment takes place (error bars?)
 #   · Specify time zero
+#
+# Less important TO DO list: No order
+#   · Safely close program even when experiment is taking place (abort button)
+#   · Choose settling precission or at least verify
+#   · Add error bars to saved data
+#   · Errors should not fail silently (at east throw an error window)
 #   · Define waiting time and number of pulses averaged and store in csv
 #   · If OVERLOAD then AUTOGAIN else proceed
-#   · Add minimum requirement for step length (look how small can it be on the delay stage docs)
-#   · Add minimum requirement for step length (look how small can it be on the delay stage docs)
+#   · Appropiately measure time estimation
 #   · Add comment header to CSV
 #   · Implement loading different experiment presets, right now there only one, default, and the 
 #     user overwrites it to save a preset.
@@ -57,7 +60,7 @@ def show_screen(screen_name, frame_type):
     # Screens = {
     #     "Initialization screen": {
     #         "Screen frame": "Init_parent_frame",
-    #         "Child frame": {}ew
+    #         "Child frame": {}
     #         },
     # 
     #     "Experiment screen": {
@@ -445,7 +448,7 @@ def launch_experiment(entries_widgets):
                 monitoring_window.after(100, check_for_updates)
             else:
                 experiment_thread.join()
-                label.config(text="Initialization Complete")
+                label.config(text="Experiment completed")
 
                 # Add button to close window
                 button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
@@ -479,9 +482,9 @@ def estimate_experiment_timespan():
         if valid_parameters:
 
             # Get the relevant parameters
-            start_position = screen_values["start_position_mm"]
-            end_position = screen_values["end_position_mm"]
-            step_size = screen_values["step_size_mm"]
+            start_position = screen_values["start_position"]
+            end_position = screen_values["end_position"]
+            step_size = screen_values["step_size"]
 
             #time_constant = 1
             settling_time = 5 * time_constant
@@ -630,7 +633,7 @@ def edit_trip_legs():
     # We now append as many trip legs as requested
     new_legs = {}
     for leg_number in range(0, num_legs):
-        new_legs[str(leg_number)] = {"start_position_mm": 0.0, "end_position_mm": 0.0, "step_size_mm": 0.0}
+        new_legs[str(leg_number)] = {"start_position": 0.0, "end_position": 0.0, "step_size": 0.0}
 
     new_experiment_dict["trip_legs"] = new_legs
 
@@ -639,7 +642,7 @@ def edit_trip_legs():
     create_experiment_gui_from_dict(new_experiment_dict)
 
 
-# GRID ABSOLUTELY REFUSES TO WORK. FUCKING CHANGE THESE FUCKING FRAMES TO EVERYTHING BEING INSIDE THE SAME FRAME AND FYUCK THIS FUCKING GARBARGE!ª!!!!!w
+
 def GUI():
     
     # Extract default configuration values for both devices from the configuration file
@@ -817,11 +820,9 @@ def GUI():
     button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
     button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
-
     # Inform user of expected experiment time before launching experiment
     button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=estimate_experiment_timespan)
     button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
-
 
     # This button launches a scan
     button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, entries))

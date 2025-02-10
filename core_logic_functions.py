@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
 from pymeasure.adapters import SerialAdapter
+from math import sqrt, pow
 
 
 
@@ -117,11 +118,13 @@ def evaluate_status_bits(serial_num, channel, lib):
             print(f"{description_0}")  # Bit is not set
 
 
-def move_to_position(lib, serial_num, channel, position):
-
-    # Set a new position in real units [mm]
-    if Troubleshooting:
-        print(f"    · New position: {position}mm")
+def move_to_position(lib, serial_num, channel, position_ps):
+    
+    # Convert position from picoseconds to mm
+    light_speed_vacuum = 299792458 # m/s
+    refraction_index_air = 1.0003
+    ps_to_mm = light_speed_vacuum / (refraction_index_air * (1E9))
+    position = position_ps * ps_to_mm
 
     # Convert to device units
     new_pos_real = c_double(position)  # in real units
@@ -137,7 +140,7 @@ def move_to_position(lib, serial_num, channel, position):
     elif Troubleshooting:
             print(f"    · BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
-    print(f"    · Moving to: {new_pos_real.value} [mm]")
+    print(f"    · Moving to: {round(new_pos_real.value, 2)} [mm]")
     if Troubleshooting:
         print(f"    · That position in device units is: {new_pos_dev.value} [dev units]")
 
@@ -150,7 +153,7 @@ def move_to_position(lib, serial_num, channel, position):
 
     # Feed the position now converted to device units to the device
 
-    # This sleep function is sacred, society could collapse if you were to remove it
+    # This sleep function is sacred, society could collapse if you were to remove it!!!
     time.sleep(1)
     result = lib.BMC_MoveToPosition(serial_num, channel, new_pos_dev)
     if result != 0:
@@ -200,7 +203,9 @@ def move_to_position(lib, serial_num, channel, position):
                                     byref(real_pos),
                                     c_int(0))
 
-    print(f'     Arrived at position: {real_pos.value}')
+    # Convert back from mm to ps and report to user
+    mm_to_ps = 1 / ps_to_mm
+    print(f'     Arrived at position: {round(real_pos.value * mm_to_ps, 2)}ps')
 
     return dev_pos
 
@@ -552,6 +557,28 @@ def autorange(adapter):
         print(f"Error sending AutoRange command: {e}")
 
 
+# --- Request AutoScale ---
+def autoscale(adapter):
+    """
+    Sends the command to autoscale. Scale is an artificial zoom done in postprocessing
+    so it's generally just good enough to autorange for most measurements. Think of it
+    like taking a picture, operating the focus would be like operating the range, zooming
+    into the png once you are looking at the already snapped picture on your computer would
+    be like adjusting autoscale, it should not add any real precission to the measurement, 
+    however the manual advises that it should be properly set to calculate X noise and Y noise.
+    I don't understand why but 'm doing it.
+    """
+    try:
+        command = "ASCL\n"  # Same result as pressing Auto Scale on device
+        adapter.write(command)
+        time.sleep(0.1)
+
+
+    except Exception as e:
+        print(f"Error sending AutoScale command: {e}")
+
+
+
 # --- Request Time Constant ---
 def request_time_constant(adapter):
     """
@@ -592,6 +619,38 @@ def request_filter_slope(adapter):
     
     except Exception as e:
         print(f"Error requesting filter slope: {e}")
+        return None
+
+
+
+# --- Request R noise ---
+def request_R_noise(adapter):
+    """
+    Queries X noise and Y noise and calculates R noise from that.
+    """
+
+
+    try:
+        command = "OUTP? XNOise\n"
+        adapter.write(command)
+        time.sleep(0.1)  # Small delay for processing
+        response = adapter.read()
+        X_noise = float(response.strip()) # in Vrms
+
+        command = "OUTP? YNOise\n"
+        adapter.write(command)
+        time.sleep(0.1)  # Small delay for processing
+        response = adapter.read()
+        Y_noise = float(response.strip()) # in Vrms
+
+        # If X noise and Y noise are Vrms values then 
+        # we compute the addition of both like so
+        R_noise = sqrt( pow(X_noise, 2) + pow(Y_noise, 2) )
+
+        return R_noise
+    
+    except Exception as e:
+        print(f"Error requesting R: {e}")
         return None
 
 

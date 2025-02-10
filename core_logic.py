@@ -201,7 +201,7 @@ def initialization(Troubleshooting):
     ########################### Change velocity parameters ###########################
     # We set the parameters to the default that we see on screen when switching on the machines driver.
     # We do this because Thorlabs engineers sell a 11K€ machine with some piece of sh*t software that
-    # will immediately shoot your stage into over limit speeds when you run their github example with it
+    # will immediately shoot your stage into over limit speeds when you run it with their github code.
     # The machine will catch this self destruction attempt and stop itself abruptly (without throwing any
     # errors mind you). So we need to manually input some safe parameters when loading.
     # Don't trust their repo, don't trust their C_API docs, verify anything and everything.           
@@ -334,9 +334,9 @@ def perform_experiment(parameters_dict):
     for leg_number, leg_parameters in parameters_dict["trip_legs"].items():
 
         # Extract scan parameters for each leg
-        start_position = leg_parameters["start_position_mm"]
-        end_position = leg_parameters["end_position_mm"]
-        step_size = leg_parameters["step_size_mm"]
+        start_position = leg_parameters["start_position"]
+        end_position = leg_parameters["end_position"]
+        step_size = leg_parameters["step_size"]
 
         Position_within_limtis = True
 
@@ -364,8 +364,8 @@ def perform_experiment(parameters_dict):
                 if (end_position not in Positions):
                     Positions.append(end_position)
 
-    # Finally we create an empty array to hold the captured data for each position
-    Data = np.zeros_like(np.array(Positions))
+    # We create an empty array to hold the captured data for each position
+    Photodiode_data = np.zeros_like(np.array(Positions))   
 
 
 
@@ -374,68 +374,112 @@ def perform_experiment(parameters_dict):
     for index in range(0, len(Positions)):
 
         print(f"    ·Measurement at step: {index+1} of {len(Positions)}")
-        clfun.move_to_position(lib, serial_num, channel, position=Positions[index]) # Move
+        clfun.move_to_position(lib, serial_num, channel, position_ps=Positions[index]) # Move
         
         print(f"    ·Awaiting for filter settling")
         time.sleep(settling_time)                                                   # Settle
         
         print(f"    ·Capturing data")
-        Data[index] = clfun.request_R(adapter)                                      # Capture
+        Photodiode_data[index] = clfun.request_R(adapter)                                      # Capture
         print("\n")
 
-    print(f"    ·Experiment is finished\n")       
+    print(f"Experiment is finished\n")
 
-'''
+    # We also create non empty arays holding the error bars for each axis
+    print(f"Computing Errors\n")
+    Photodiode_data_errors = np.zeros_like(np.array(Positions))
+    Position_errors = np.zeros_like(np.array(Positions))
+
+    # To find the positional error we'll need to convert position error from mm to ps
+    light_speed_vacuum = 299792458 # m/s
+    refraction_index_air = 1.0003
+    mm_to_ps = (refraction_index_air * (1E9)) / light_speed_vacuum
+
+    # According to the datasheet for the ODL600M delay stage used in this experiment the "absolute on 
+    # axis error" is +/-12um, this is a lower limit for the actual error I would expect
+    # since error (the way I understand it) accumulates for larger distances. Oh well... ThorLabs you
+    # did it again you sly dog
+    delay_stage_error = 12 * mm_to_ps
+    for index in range(0, len(Position_errors)):
+        Position_errors[index] = delay_stage_error
+
+    # The manual calls for a proper scale to be set before taking Xnoise or Ynoise measurements
+    clfun.autoscale(adapter)
+
+    # The manual for the older version (SR830) also calls for use of longer time constants to 
+    # obtain better readings, it's best to do it good once than taking readings throughout 
+    # the measurement 
+    clfun.set_time_constant(adapter, 100)
+
+    # We take one PD noise measurement and append it to all previous measurements
+    R_noise = clfun.request_R_noise(adapter)
+    for index in range(0, len(Photodiode_data_errors)):
+        Photodiode_data_errors[index] = R_noise
+
     ########################### Store and display data ###########################
-
+    print("Saving Data")
     # Create a folder to store data into
 
     # Get the directory of the current script
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Get the parent directory
-    parent_dir = os.path.dirname(current_dir)
+    #parent_dir = os.path.dirname(current_dir)
 
     # Define the Output folder path
-    output_folder = os.path.join(parent_dir, "Output")
+    #output_folder = os.path.join(parent_dir, "Output")
+    output_folder = os.path.join(current_dir, "Output")
 
     # Create the Output folder if it doesn't exist
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
         print(f"Created folder: {output_folder}")
 
-    # Create a subfolder at Output to store the experiment data
-    data_folder = os.path.join(output_folder, experiment_title)
-
-    print(f"Storing data on CSV file")
+    print(f"Writting CSV file")
 
     # Create a DataFrame with headers
     df = pd.DataFrame({
-        "Delay position (mm)": np.array(Positions),
-        "Voltage from PD (Vrms)": Data
+        "Time (ps)": np.array(Positions),
+        "Time absolute On-axis error [+/-ps]": Position_errors,
+        "Voltage from PD (Vrms)": Photodiode_data,
+        "PD error [placeholder]": Photodiode_data_errors
     })
 
     # Get current date as a string
     date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
-    CSV_file_title = experiment_title + ".csv"
+
+    # Create a subfolder at Output to store the experiment data
+    experiment_name = parameters_dict["experiment_name"]
+    data_folder = os.path.join(output_folder, experiment_name)
+    data_folder = os.path.join(data_folder, date_string)
+    os.makedirs(data_folder)
+
+    file_name = parameters_dict["experiment_name"] + ".csv"
+    file_path = os.path.join(data_folder, file_name)
 
     # Create a string storing relevant experiment data
     experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}V")
 
     # Write the parameters and data to a CSV file
-    with open(CSV_file_title, "w") as file:
-        file.write(f"# {experiment_params}\n")  # Add the parameters as a comment line
-        df.to_csv(file, index=False)
 
-    print(f"Showing curve on screen, please close the graphs window to continue7")
+    # Add the parameters as a comment line
+    with open(file_path, "w") as file:
+        file.write(f"# {experiment_params}\n")  
+
+    # Append the rest of the data to the csv
+    df.to_csv(file_path, index=False, mode="a", lineterminator="\n")
+
+    '''
+    print(f"Showing curve on screen, please close the graphs window to continue")
     # Show data
     plt.plot(Positions, Data)
     plt.xlabel('Delay position (mm)')
     plt.ylabel('Measured PD voltage (Vrms)')
     #plt.legend()
     plt.show()
+    '''
 
-'''
+
 
 def close_devices(Troubleshooting):
     ########################### Close the device ###########################

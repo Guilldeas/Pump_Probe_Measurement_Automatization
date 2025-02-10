@@ -1,6 +1,6 @@
 {
-    "start_position_mm": {"type": "float", "max": 600.0, "min": 0.0}, 
-    "end_position_mm": {"type": "float", "max": 600.0, "min": 0.0}, 
-    "step_size_mm": {"type": "float"}, 
+    "start_position": {"type": "float", "max": 2001.0, "min": 0.0}, 
+    "end_position": {"type": "float", "max": 2001.0, "min": 0.0}, 
+    "step_size": {"type": "float", "max": 2001.0, "min": 3.34E-4}, 
     "experiment_title": {}
 }
