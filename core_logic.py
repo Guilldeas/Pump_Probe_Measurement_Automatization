@@ -1,15 +1,3 @@
-# TO DO list
-# 
-# · Check LP settling time (depends on filter slope too)
-# · work in ps
-# · Store data on neat dedicated folders (exclude them from git)
-# · Make it so if an error is caught user can fix it and then continue code execution from where it was left
-# · Verify whether reference input impedance is 50 or 1Meg 
-#  
-
-
-
-
 import time
 import numpy as np
 import os
@@ -377,15 +365,15 @@ def perform_experiment(parameters_dict):
         clfun.move_to_position(lib, serial_num, channel, position_ps=Positions[index]) # Move
         
         print(f"    ·Awaiting for filter settling")
-        time.sleep(settling_time)                                                   # Settle
+        time.sleep(settling_time)                                                      # Settle
         
         print(f"    ·Capturing data")
-        Photodiode_data[index] = clfun.request_R(adapter)                                      # Capture
+        Photodiode_data[index] = clfun.request_R(adapter)                              # Capture
         print("\n")
 
     print(f"Experiment is finished\n")
 
-    # We also create non empty arays holding the error bars for each axis
+    # We also create non empty arrays holding the error bars for each axis
     print(f"Computing Errors\n")
     Photodiode_data_errors = np.zeros_like(np.array(Positions))
     Position_errors = np.zeros_like(np.array(Positions))

@@ -14,10 +14,13 @@ from tkinter import simpledialog
 
 
 # TO DO list: From most to least important
-#   · Show graph on screen as experiment takes place (error bars?)
+#   · Error bars for each point in time
+#   · Draw GUI outside of thread (Tkinter is not thread safe)
+#   · Show graph on screen as experiment takes place
 #   · Specify time zero
+#   · Save at every point or just at the end option
 #
-# Less important TO DO list: No order
+# Less important TO DO list: No order in particular
 #   · Safely close program even when experiment is taking place (abort button)
 #   · Choose settling precission or at least verify
 #   · Add error bars to saved data
