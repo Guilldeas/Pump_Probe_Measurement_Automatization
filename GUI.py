@@ -11,17 +11,21 @@ from queue import Queue
 from functools import partial
 from math import ceil
 from tkinter import simpledialog
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
 
 
 # TO DO list: From most to least important
-#   · Error bars for each point in time
+#   · Save graph at the end
 #   · Draw GUI outside of thread (Tkinter is not thread safe)
-#   · Show graph on screen as experiment takes place
 #   · Specify time zero
+#   · Scrollbar for legs list
 #   · Save at every point or just at the end option
 #
 # Less important TO DO list: No order in particular
 #   · Safely close program even when experiment is taking place (abort button)
+#   · Add boolean flags to experiment that exchange speed for acquracy (measure noise at every step,
+#     autogain at every step...)
 #   · Choose settling precission or at least verify
 #   · Add error bars to saved data
 #   · Errors should not fail silently (at east throw an error window)
@@ -42,6 +46,10 @@ from tkinter import simpledialog
 # initialization is taking place
 initialized = False
 entries = {}
+
+# Create a queue object to send data from 
+# experiment thread back 
+experiment_data_queue = Queue()
 
 
 def show_screen_from_menu(screen_name):
@@ -138,12 +146,12 @@ def initialization_thread_logic():
 
 
 
-def experiment_thread_logic(parameters_dict):
+def experiment_thread_logic(parameters_dict, experiment_data_queue):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.perform_experiment(parameters_dict)
+        core_logic.perform_experiment(parameters_dict, experiment_data_queue)
         #core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
@@ -363,7 +371,7 @@ def save_parameters(experiment_preset):
 
 
 
-def launch_experiment(entries_widgets):
+def launch_experiment(entries_widgets, experiment_data_queue):
 
     if not initialized:
         messagebox.showinfo("Error launching experiment", "Please wait for device initialization to complete before launching experiment")
@@ -401,13 +409,14 @@ def launch_experiment(entries_widgets):
 
     # Catch exceptions while performing the experiment 
     try:
-
         # Create a window to monitor experiment
         monitoring_window = Toplevel(main_window)
         monitoring_window.title("Experiment in progress")
-        monitoring_window.geometry("800x300")
+        monitoring_window.geometry("1800x600")
         monitoring_window.resizable(True, True)
         monitoring_window.grab_set()  # Make it modal (blocks interaction with other windows)
+
+        # Create scrollable log
 
         # Create a Listbox to display initialization messages
         listbox = tk.Listbox(monitoring_window, selectmode=tk.SINGLE, height=15)
@@ -429,7 +438,22 @@ def launch_experiment(entries_widgets):
         label = tk.Label(monitoring_window, text="Please wait while the experiment takes place...")
         label.grid(padx=20, pady=20)
 
-        # Queue for communication between threads
+        # Create live graph
+
+        # Create figure and axes
+        fig, axes = plt.subplots()
+        axes.set_xlabel('t [ps]')
+        axes.set_ylabel('PD [Vrms]')
+
+        # Frame for Graph
+        graph_frame = tk.Frame(monitoring_window)
+        graph_frame.grid(row=0, column=2, sticky="ew")
+
+        # Canvas for Matplotlib
+        canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+        canvas.get_tk_widget().grid(row=0, column=0, sticky="ew")
+
+        # Queue for reading prints from core_logic functions and displaying them on listbox
         output_queue = Queue()
 
         # Redirect stdout and stderr to the queue
@@ -437,7 +461,7 @@ def launch_experiment(entries_widgets):
 
         # Run experiment on a different thread
         experiment_thread = threading.Thread(target=experiment_thread_logic, 
-                                                args=(experiment_parameters,))
+                                                args=(experiment_parameters, experiment_data_queue))
         experiment_thread.start()
 
         # Function to check for updates from the queue
@@ -447,8 +471,37 @@ def launch_experiment(entries_widgets):
                 listbox.insert(tk.END, new_message)
                 listbox.see(tk.END)  # Auto-scroll to the bottom
 
+            # Update GUI as long as the experiment is taking place
             if experiment_thread.is_alive():
+
+                # Only update graph whenever new data is acquired
+                if not experiment_data_queue.empty():
+
+                    # Get data from thread
+                    data_packet = experiment_data_queue.get()
+                    positions = data_packet["Positions"]
+                    photodiode_data = data_packet["Photodiode data"]
+                    photodiode_data_errors = data_packet["Photodiode data errors"]
+
+                    # Clear and re-plot
+                    axes.clear()
+                    axes.set_xlabel('t [ps]')
+                    axes.set_ylabel('PD [Vrms]')
+                    axes.plot(positions[:len(photodiode_data)], photodiode_data, marker='o', linestyle='-', color="black")
+                    axes.errorbar(positions[:len(photodiode_data)], photodiode_data, yerr=photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
+
+                    # Fix X-Axis and adjust Y-axis dynamically with some extra space
+                    axes.set_xlim(0.9*min(positions), 1.1*max(positions))
+                    if len(photodiode_data) > 1:
+                        axes.set_ylim(0.5*min(photodiode_data), 1.5*max(photodiode_data))
+
+                    # Redraw Canvas
+                    canvas.draw()
+
+                # Check every 100ms for new data
                 monitoring_window.after(100, check_for_updates)
+
+            # Close experiment thread after it's done
             else:
                 experiment_thread.join()
                 label.config(text="Experiment completed")
@@ -828,7 +881,7 @@ def GUI():
     button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
 
     # This button launches a scan
-    button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, entries))
+    button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, entries, experiment_data_queue))
     button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
 

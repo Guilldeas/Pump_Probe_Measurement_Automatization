@@ -58,7 +58,7 @@ def update_plot():
         # Redraw Canvas
         canvas.draw()
 
-    # This is a way to not freeze the GUI while waiting in the while loop for new data.
+    # This is a way to avoid freezing the GUI while waiting in the while loop for new data.
     # We call this function after 100ms
     graph_window.after(100, update_plot)  # Run again in 100ms
 

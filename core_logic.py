@@ -299,8 +299,8 @@ def request_time_constant(start_position, end_position, step_size):
 
     
     
-
-def perform_experiment(parameters_dict):
+'''Is the scope of experiment_data_queue correct?'''
+def perform_experiment(parameters_dict, experiment_data_queue):
 
     # The input dict contains information for each leg of the trip
     time_constant = parameters_dict["time_constant"]
@@ -352,57 +352,108 @@ def perform_experiment(parameters_dict):
                 if (end_position not in Positions):
                     Positions.append(end_position)
 
-    # We create an empty array to hold the captured data for each position
-    Photodiode_data = np.zeros_like(np.array(Positions))   
+    # We create empty lists to hold the captured data and error values
+    Photodiode_data = []
+    Photodiode_data_errors = []
+    Position_errors = []
 
-
+    # Raise this flag if you want to profile how much each step in the scanning loop takes
+    profiling = True
+    if profiling:
+        moving = []
+        settling = []
+        autoscaling = []
+        autoranging = []
+        capturing = []
+        estimating = []
+        total = []
 
     ########################### Scan and Measure at list of positions ###########################
-
+    
     for index in range(0, len(Positions)):
+
+        # Rgister the timestamp when the iteration starts
+        if profiling:
+            startup_timestamp = time.time()
 
         print(f"    ·Measurement at step: {index+1} of {len(Positions)}")
         clfun.move_to_position(lib, serial_num, channel, position_ps=Positions[index]) # Move
-        
-        print(f"    ·Awaiting for filter settling")
+
+        # For every function ran in the loop we store how much time it takes to run it
+        if profiling:
+            moved_timestamp = time.time()
+            moving.append(moved_timestamp - startup_timestamp)
+
+        print(f"    ·Awaiting {settling_time}s for filter settling")
         time.sleep(settling_time)                                                      # Settle
+        if profiling:
+            settled_timestamp = time.time()
+            settling.append(settled_timestamp - moved_timestamp)
+
+        print(f"    ·Capturing data")                                                  # Capture
+        clfun.autoscale(adapter)
+        if profiling:
+            autoscaled_timestamp = time.time()
+            autoscaling.append(autoscaled_timestamp - settled_timestamp)
+
+        clfun.autorange(adapter)
+        if profiling:
+            autoranged_timestamp = time.time()
+            autoranging.append(autoranged_timestamp - autoscaled_timestamp)
+
+        Photodiode_data.append(clfun.request_R(adapter))
+        if profiling:
+            data_captured_timestamp = time.time()
+            capturing.append(data_captured_timestamp - autoranged_timestamp)
+
+        print(f"    ·Measuring error\n")
+        Photodiode_data_errors.append(clfun.request_R_noise(adapter))
+        if profiling:
+            error_estimated_timestamp = time.time()
+            estimating.append(error_estimated_timestamp - data_captured_timestamp)
         
-        print(f"    ·Capturing data")
-        Photodiode_data[index] = clfun.request_R(adapter)                              # Capture
-        print("\n")
+        if profiling:
+            total_timestamp = time.time() - startup_timestamp
+            total.append(total_timestamp)
+
+        # Send data through queue to the GUI script to draw it. Do it with copies or else
+        # we'll pass references to the local lists "Photodiode_data" and the GUI will
+        # be able to access them and attempt to draw from them, this leads to an error
+        # where the error bar has not been calculated but the photodiode data has been
+        # acquired leading to an incorrect size error when plotting 
+        data_packet = {
+                        "Photodiode data": Photodiode_data.copy(), 
+                        "Photodiode data errors": Photodiode_data_errors.copy(),
+                        "Positions": Positions.copy()
+                      }
+        experiment_data_queue.put(data_packet)
 
     print(f"Experiment is finished\n")
 
-    # We also create non empty arrays holding the error bars for each axis
-    print(f"Computing Errors\n")
-    Photodiode_data_errors = np.zeros_like(np.array(Positions))
-    Position_errors = np.zeros_like(np.array(Positions))
+    # POSSIBLE BUG: What happens when we don't run one of the functions?
+    # Report to user the average percentage of total iteration time spent on each function
+    if profiling:
+        print(f"The average time and percentage spent on each step for every action taken was:")
+        print(f'    ·Moving stage : {round((sum(moving)/len(moving)), 1)}s and {round( 100 * (sum(moving)/len(moving)) / (sum(total)/len(total)), 1)}% of total\n')
+        print(f'    ·Settling filter : {round((sum(settling)/len(settling)), 1)}s and {round( 100 * (sum(settling)/len(settling)) / (sum(total)/len(total)), 1)}%\n')
+        print(f'    ·Autoscaling lockin : {round((sum(autoscaling)/len(autoscaling)), 1)}s and {round( 100 * (sum(autoscaling)/len(autoscaling)) / (sum(total)/len(total)), 1)}%\n')
+        print(f'    ·Autoranging lockin : {round((sum(autoranging)/len(autoranging)), 1)}s and {round( 100 * (sum(autoranging)/len(autoranging)) / (sum(total)/len(total)), 1)}%\n')
+        print(f'    ·Capturing data : {round((sum(capturing)/len(capturing)), 1)}s and {round( 100 * (sum(capturing)/len(capturing)) / (sum(total)/len(total)), 1)}%\n')
+        print(f'    ·Estimating error from lockin : {round((sum(estimating)/len(estimating)), 1)}s and {round( 100 * (sum(estimating)/len(estimating)) / (sum(total)/len(total)), 1)}%\n')
 
+    
     # To find the positional error we'll need to convert position error from mm to ps
-    light_speed_vacuum = 299792458 # m/s
-    refraction_index_air = 1.0003
-    mm_to_ps = (refraction_index_air * (1E9)) / light_speed_vacuum
-
     # According to the datasheet for the ODL600M delay stage used in this experiment the "absolute on 
     # axis error" is +/-12um, this is a lower limit for the actual error I would expect
     # since error (the way I understand it) accumulates for larger distances. Oh well... ThorLabs you
     # did it again you sly dog
-    delay_stage_error = 12 * mm_to_ps
-    for index in range(0, len(Position_errors)):
-        Position_errors[index] = delay_stage_error
+    light_speed_vacuum = 299792458 # m/s
+    refraction_index_air = 1.0003
+    mm_to_ps = (refraction_index_air * (1E9)) / light_speed_vacuum
+    delay_stage_error = 12E-3 * mm_to_ps
+    for index in range(0, len(Positions)):
+        Position_errors.append(delay_stage_error)
 
-    # The manual calls for a proper scale to be set before taking Xnoise or Ynoise measurements
-    clfun.autoscale(adapter)
-
-    # The manual for the older version (SR830) also calls for use of longer time constants to 
-    # obtain better readings, it's best to do it good once than taking readings throughout 
-    # the measurement 
-    clfun.set_time_constant(adapter, 100)
-
-    # We take one PD noise measurement and append it to all previous measurements
-    R_noise = clfun.request_R_noise(adapter)
-    for index in range(0, len(Photodiode_data_errors)):
-        Photodiode_data_errors[index] = R_noise
 
     ########################### Store and display data ###########################
     print("Saving Data")
@@ -427,10 +478,10 @@ def perform_experiment(parameters_dict):
 
     # Create a DataFrame with headers
     df = pd.DataFrame({
-        "Time (ps)": np.array(Positions),
-        "Time absolute On-axis error [+/-ps]": Position_errors,
-        "Voltage from PD (Vrms)": Photodiode_data,
-        "PD error [placeholder]": Photodiode_data_errors
+        "Time [ps]": Positions,
+        "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+        "Voltage from PD [Vrms]": Photodiode_data,
+        "PD error [Vrms]": Photodiode_data_errors
     })
 
     # Get current date as a string
@@ -456,16 +507,6 @@ def perform_experiment(parameters_dict):
 
     # Append the rest of the data to the csv
     df.to_csv(file_path, index=False, mode="a", lineterminator="\n")
-
-    '''
-    print(f"Showing curve on screen, please close the graphs window to continue")
-    # Show data
-    plt.plot(Positions, Data)
-    plt.xlabel('Delay position (mm)')
-    plt.ylabel('Measured PD voltage (Vrms)')
-    #plt.legend()
-    plt.show()
-    '''
 
 
 
