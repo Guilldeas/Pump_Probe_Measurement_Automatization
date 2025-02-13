@@ -299,14 +299,18 @@ def request_time_constant(start_position, end_position, step_size):
 
     
     
-'''Is the scope of experiment_data_queue correct?'''
-def perform_experiment(parameters_dict, experiment_data_queue):
+def perform_experiment(parameters_dict, experiment_data_queue, fig):
 
     # The input dict contains information for each leg of the trip
     time_constant = parameters_dict["time_constant"]
 
     # Prepare lockin for experiment
+
+    # Adjust preamplifier gain on the lockin, this ensures optimal signal resolution
     clfun.autorange(adapter)
+
+    # This sets sensitivity one step above gain, the point of this is to prevent 
+    # sensitivity from saturating the signal
     clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
     clfun.set_time_constant(adapter, time_constant)
     settling_time = 5 * time_constant
@@ -322,9 +326,9 @@ def perform_experiment(parameters_dict, experiment_data_queue):
     for leg_number, leg_parameters in parameters_dict["trip_legs"].items():
 
         # Extract scan parameters for each leg
-        start_position = leg_parameters["start_position"]
-        end_position = leg_parameters["end_position"]
-        step_size = leg_parameters["step_size"]
+        start_position = leg_parameters["start [ps]"]
+        end_position = leg_parameters["end [ps]"]
+        step_size = leg_parameters["step [ps]"]
 
         Position_within_limtis = True
 
@@ -352,6 +356,17 @@ def perform_experiment(parameters_dict, experiment_data_queue):
                 if (end_position not in Positions):
                     Positions.append(end_position)
 
+    # We have now concocted a list of positions which are relative to the 0 position of 
+    # the delay stage, that is: 0ps is 0mm of displacement from the home position, 
+    # however the user needs to store data and visualize it relative to the specified 
+    # "time zero" in the experiment, we need to keep track of both
+    time_zero = parameters_dict["time_zero"]
+
+    Positions_relative = []
+    for position in Positions:
+        Positions_relative.append(position - time_zero)
+
+
     # We create empty lists to hold the captured data and error values
     Photodiode_data = []
     Photodiode_data_errors = []
@@ -376,8 +391,9 @@ def perform_experiment(parameters_dict, experiment_data_queue):
         if profiling:
             startup_timestamp = time.time()
 
-        print(f"    ·Measurement at step: {index+1} of {len(Positions)}")
-        clfun.move_to_position(lib, serial_num, channel, position_ps=Positions[index]) # Move
+        print(f"Measurement at step: {index+1} of {len(Positions)}")
+        position_ps = clfun.move_to_position(lib, serial_num, channel, position_ps=Positions[index])   # Move
+        print(f"    ·Delay set to {round(position_ps - time_zero, 2)}ps")
 
         # For every function ran in the loop we store how much time it takes to run it
         if profiling:
@@ -385,13 +401,13 @@ def perform_experiment(parameters_dict, experiment_data_queue):
             moving.append(moved_timestamp - startup_timestamp)
 
         print(f"    ·Awaiting {settling_time}s for filter settling")
-        time.sleep(settling_time)                                                      # Settle
+        time.sleep(settling_time)                                                                     # Settle
         if profiling:
             settled_timestamp = time.time()
             settling.append(settled_timestamp - moved_timestamp)
 
-        print(f"    ·Capturing data")                                                  # Capture
-        clfun.autoscale(adapter)
+        print(f"    ·Capturing data")                                                                 # Capture
+        clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
         if profiling:
             autoscaled_timestamp = time.time()
             autoscaling.append(autoscaled_timestamp - settled_timestamp)
@@ -424,7 +440,7 @@ def perform_experiment(parameters_dict, experiment_data_queue):
         data_packet = {
                         "Photodiode data": Photodiode_data.copy(), 
                         "Photodiode data errors": Photodiode_data_errors.copy(),
-                        "Positions": Positions.copy()
+                        "Positions": Positions_relative.copy()
                       }
         experiment_data_queue.put(data_packet)
 
@@ -478,7 +494,7 @@ def perform_experiment(parameters_dict, experiment_data_queue):
 
     # Create a DataFrame with headers
     df = pd.DataFrame({
-        "Time [ps]": Positions,
+        "Time [ps]": Positions_relative,
         "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
         "Voltage from PD [Vrms]": Photodiode_data,
         "PD error [Vrms]": Photodiode_data_errors
@@ -497,7 +513,7 @@ def perform_experiment(parameters_dict, experiment_data_queue):
     file_path = os.path.join(data_folder, file_name)
 
     # Create a string storing relevant experiment data
-    experiment_params = str(f"Date: {date_string},Lockin was configurated to\n  time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}V")
+    experiment_params = str(f"Date: {date_string},Experiment parameters\n  time zero: {time_zero}ps,time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}V")
 
     # Write the parameters and data to a CSV file
 
@@ -507,6 +523,11 @@ def perform_experiment(parameters_dict, experiment_data_queue):
 
     # Append the rest of the data to the csv
     df.to_csv(file_path, index=False, mode="a", lineterminator="\n")
+
+    # Save live graph aswell
+    file_name = parameters_dict["experiment_name"] + ".png"
+    file_path = os.path.join(data_folder, file_name)
+    fig.savefig(file_path, dpi=300)  # Save with high resolution
 
 
 

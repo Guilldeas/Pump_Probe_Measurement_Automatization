@@ -46,8 +46,7 @@ import matplotlib.pyplot as plt
 initialized = False
 entries = {}
 
-# Create a queue object to send data from 
-# experiment thread back 
+# Create a queue object to send data from experiment thread back 
 experiment_data_queue = Queue()
 
 
@@ -136,8 +135,8 @@ def initialization_thread_logic():
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.initialization(Troubleshooting=False)
-        core_logic.initialization_dummy(Troubleshooting=False)
+        core_logic.initialization(Troubleshooting=False)
+        #core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -145,13 +144,13 @@ def initialization_thread_logic():
 
 
 
-def experiment_thread_logic(parameters_dict, experiment_data_queue):
+def experiment_thread_logic(parameters_dict, experiment_data_queue, fig):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.perform_experiment(parameters_dict, experiment_data_queue)
-        core_logic.perform_experiment_dummy(Troubleshooting=False)
+        core_logic.perform_experiment(parameters_dict, experiment_data_queue, fig)
+        #core_logic.perform_experiment_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -388,7 +387,8 @@ def launch_experiment(experiment_data_queue):
     # Construct a dict that will store the parsed verified data to later feed to the delay stage
     experiment_parameters = {
         "experiment_name": entries["experiment_name"].get(), 
-        "time_constant": float(entries["time_constant"].get())
+        "time_constant": float(entries["time_constant"].get()),
+        "time_zero":float(entries["time_zero"].get())
         }
     
     trip_legs_parsed = {}
@@ -427,7 +427,7 @@ def launch_experiment(experiment_data_queue):
 
         # Place widgets using grid
         listbox.grid(row=0, column=0, sticky="ew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        scrollbar.grid(padx=20, pady=20, row=0, column=1, sticky="ns")
 
         # Configure scrollbar
         listbox.config(yscrollcommand=scrollbar.set)
@@ -450,7 +450,7 @@ def launch_experiment(experiment_data_queue):
 
         # Frame for Graph
         graph_frame = tk.Frame(monitoring_window)
-        graph_frame.grid(row=0, column=2, sticky="ew")
+        graph_frame.grid(padx=20, pady=20, row=0, column=2, sticky="ew")
 
         # Canvas for Matplotlib
         canvas = FigureCanvasTkAgg(fig, master=graph_frame)
@@ -464,7 +464,7 @@ def launch_experiment(experiment_data_queue):
 
         # Run experiment on a different thread
         experiment_thread = threading.Thread(target=experiment_thread_logic, 
-                                                args=(experiment_parameters, experiment_data_queue))
+                                                args=(experiment_parameters, experiment_data_queue, fig))
         experiment_thread.start()
 
         # Function to check for updates from the queue
@@ -490,11 +490,16 @@ def launch_experiment(experiment_data_queue):
                     axes.clear()
                     axes.set_xlabel('t [ps]')
                     axes.set_ylabel('PD [Vrms]')
-                    axes.plot(positions[:len(photodiode_data)], photodiode_data, marker='o', linestyle='-', color="black")
+                    axes.plot(positions[:len(photodiode_data)], photodiode_data, linestyle='-', color="black")
                     axes.errorbar(positions[:len(photodiode_data)], photodiode_data, yerr=photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
 
                     # Fix X-Axis and adjust Y-axis dynamically with some extra space
-                    axes.set_xlim(0.9*min(positions), 1.1*max(positions))
+                    if min(positions) >= 0:
+                        axes.set_xlim(0.9*min(positions), 1.1*max(positions))
+
+                    if min(positions) < 0:
+                        axes.set_xlim(1.1*min(positions), 1.1*max(positions))
+
                     if len(photodiode_data) > 1:
                         axes.set_ylim(0.5*min(photodiode_data), 1.5*max(photodiode_data))
 

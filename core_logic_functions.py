@@ -120,13 +120,13 @@ def evaluate_status_bits(serial_num, channel, lib):
 
 def move_to_position(lib, serial_num, channel, position_ps):
     
-    # Convert position from picoseconds to mm
+    # Convert position from picoseconds to real units [mm]
     light_speed_vacuum = 299792458 # m/s
     refraction_index_air = 1.0003
     ps_to_mm = light_speed_vacuum / (refraction_index_air * (1E9))
     position = position_ps * ps_to_mm
 
-    # Convert to device units
+    # Convert from real units to device units [steps]
     new_pos_real = c_double(position)  # in real units
     new_pos_dev = c_int()
     result = lib.BMC_GetDeviceUnitFromRealValue(serial_num,
@@ -140,7 +140,7 @@ def move_to_position(lib, serial_num, channel, position_ps):
     elif Troubleshooting:
             print(f"    · BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
-    print(f"    · Moving to: {round(new_pos_real.value, 2)} [mm]")
+    #print(f"    · Moving stage to position: {round(new_pos_real.value, 2)} [mm]")
     if Troubleshooting:
         print(f"    · That position in device units is: {new_pos_dev.value} [dev units]")
 
@@ -205,9 +205,10 @@ def move_to_position(lib, serial_num, channel, position_ps):
 
     # Convert back from mm to ps and report to user
     mm_to_ps = 1 / ps_to_mm
-    print(f'     Arrived at position: {round(real_pos.value * mm_to_ps, 2)}ps')
+    #print(f'     Arrived at position: {round(real_pos.value * mm_to_ps, 2)}ps')
 
-    return dev_pos
+    # Return position at the end of movement in ps
+    return real_pos.value * mm_to_ps
 
 
 
@@ -696,7 +697,7 @@ def find_next_sensitivity(adapter):
             return None
 
         current_range = input_range_table[current_range_index]
-        print(f"    ·Current Input Range: {current_range} (Index {current_range_index})")
+        #print(f"    ·Current Input Range: {current_range} (Index {current_range_index})")
 
         # Step 2: Find the sensitivity above the current range
         range_voltage_map = {
@@ -718,10 +719,10 @@ def find_next_sensitivity(adapter):
                 break
 
         if next_sensitivity:
-            print(f"    ·Next Sensitivity: {next_sensitivity} V")
+            #print(f"    ·Next Sensitivity: {next_sensitivity} V")
             return next_sensitivity
         else:
-            print("No sensitivity found above the current input range.")
+            #print("No sensitivity found above the current input range.")
             return max(range_voltage_map.values())
 
     except Exception as e:
