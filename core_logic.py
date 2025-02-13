@@ -16,16 +16,16 @@ import core_logic_functions as clfun
 # Dummy functios to test development on machines that are not connected to experiment devices
 def initialization_dummy(Troubleshooting):
     print("Start initializaiton")
-    for task in range(1, 6):
+    for task in range(1, 3):
         time.sleep(1)
         print(f"Task {task} completed")
 
 
 def perform_experiment_dummy(Troubleshooting):
     print("Start Experiment")
-    for task in range(1, 6):
+    for task in range(1, 3):
         time.sleep(1)
-        print(f"Task {task} completed")
+        print(f"Scan {task} completed")
 
 
 

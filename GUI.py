@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 
 # TO DO list: From most to least important
 #   · Save graph at the end
-#   · Draw GUI outside of thread (Tkinter is not thread safe)
 #   · Specify time zero
 #   · Scrollbar for legs list
 #   · Save at every point or just at the end option
@@ -137,8 +136,8 @@ def initialization_thread_logic():
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.initialization(Troubleshooting=False)
-        #core_logic.initialization_dummy(Troubleshooting=False)
+        #core_logic.initialization(Troubleshooting=False)
+        core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -151,8 +150,8 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue):
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.perform_experiment(parameters_dict, experiment_data_queue)
-        #core_logic.initialization_dummy(Troubleshooting=False)
+        #core_logic.perform_experiment(parameters_dict, experiment_data_queue)
+        core_logic.perform_experiment_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -343,6 +342,7 @@ def save_parameters(experiment_preset):
     trip_legs = experiment_preset["trip_legs"]
 
     # We create empty presets to store parameters after validation
+    global entries
     trip_legs_entries = entries["trip_legs"]
     experiment_preset_save = {}
     trip_legs_save = {}
@@ -360,6 +360,7 @@ def save_parameters(experiment_preset):
     # Finally we construct a dict to save it by getting the parameters from screen that don't need to save the validated
     experiment_preset_save["experiment_name"] = entries["experiment_name"].get()
     experiment_preset_save["time_constant"] = entries["time_constant"].get()
+    experiment_preset_save["time_zero"] = entries["time_zero"].get()
     experiment_preset_save["trip_legs"] = trip_legs_save
     
     # After all tests have passed we save them into a json
@@ -371,7 +372,9 @@ def save_parameters(experiment_preset):
 
 
 
-def launch_experiment(entries_widgets, experiment_data_queue):
+def launch_experiment(experiment_data_queue):
+
+    global entries
 
     if not initialized:
         messagebox.showinfo("Error launching experiment", "Please wait for device initialization to complete before launching experiment")
@@ -380,12 +383,12 @@ def launch_experiment(entries_widgets, experiment_data_queue):
     # First we'll verify parameters are safe before launching the experiment
     
     # Extract references to data we wanna validate
-    Legs_entries = entries_widgets["trip_legs"]
+    Legs_entries = entries["trip_legs"]
 
     # Construct a dict that will store the parsed verified data to later feed to the delay stage
     experiment_parameters = {
-        "experiment_name": entries_widgets["experiment_name"].get(), 
-        "time_constant": float(entries_widgets["time_constant"].get())
+        "experiment_name": entries["experiment_name"].get(), 
+        "time_constant": float(entries["time_constant"].get())
         }
     
     trip_legs_parsed = {}
@@ -523,6 +526,8 @@ def launch_experiment(entries_widgets, experiment_data_queue):
 
 def estimate_experiment_timespan():
 
+    global entries
+
     Legs_entries = entries["trip_legs"]
     time_constant = float(entries["time_constant"].get())
 
@@ -538,9 +543,9 @@ def estimate_experiment_timespan():
         if valid_parameters:
 
             # Get the relevant parameters
-            start_position = screen_values["start_position"]
-            end_position = screen_values["end_position"]
-            step_size = screen_values["step_size"]
+            start_position = screen_values["start [ps]"]
+            end_position = screen_values["end [ps]"]
+            step_size = screen_values["step [ps]"]
 
             #time_constant = 1
             settling_time = 5 * time_constant
@@ -592,6 +597,7 @@ def create_experiment_gui_from_dict(parameters_dict):
 
     experiment_name = parameters_dict["experiment_name"]
     time_constant = parameters_dict["time_constant"]
+    time_zero = parameters_dict["time_zero"]
     trip_legs = parameters_dict["trip_legs"]
 
     experiment_parameters_frame = Screens["Experiment screen"]["Child frame"]
@@ -631,6 +637,16 @@ def create_experiment_gui_from_dict(parameters_dict):
     combo.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
     entries["time_constant"] = combo
     row_num += 1
+
+    # Time zero input
+    label = tk.Label(experiment_parameters_frame, text="time zero [ps]", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    entry = tk.Entry(experiment_parameters_frame)
+    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+    entry.insert(0, time_zero)
+    entries["time_zero"] = entry
+    row_num += 1
+
 
     trip_legs_entries = {}
     # trip_legs is a dict storing each leg with it's corresponding parameters
@@ -680,16 +696,21 @@ def create_experiment_gui_from_dict(parameters_dict):
 
 def edit_trip_legs():
 
+    global entries
+
     # We first ask the user to input number of legs in the trip
     num_legs = int(simpledialog.askstring("Input", "Please enter number of legs in the trip:"))
 
     # We then construct a dict from which to construct the GUI later holding placeholder values
-    new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": "1"}
+    # but we should still preserve parameters that the user might care for
+    time_constant = float(entries["time_constant"].get())
+    time_zero = float(entries["time_zero"].get())
+    new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": str(time_constant), "time_zero": str(time_zero)}
     
     # We now append as many trip legs as requested
     new_legs = {}
     for leg_number in range(0, num_legs):
-        new_legs[str(leg_number)] = {"start_position": 0.0, "end_position": 0.0, "step_size": 0.0}
+        new_legs[str(leg_number)] = {"start [ps]": 0.0, "end [ps]": 0.0, "step [ps]": 0.0}
 
     new_experiment_dict["trip_legs"] = new_legs
 
@@ -699,229 +720,213 @@ def edit_trip_legs():
 
 
 
-def GUI():
+############################### MAIN code starts here ###########################
+
+# Extract default configuration values for both devices from the configuration file
+with open('Utils\default_config.json', "r") as json_file:
+    default_config = json.load(json_file)
+
+default_values_delay_stage = default_config["Delay Stage Default Config Params"]
+default_values_lockin = default_config["Lockin Default Config Params"]
+
+
+
+############################### Start drawing GUI ###############################
+# Create the main window
+global main_window
+main_window = tk.Tk()
+main_window.title("Automatic Pump Probe")
+main_window.geometry("1920x1080")
+
+# There are different screens (frames) in this GUI, each serves a different function 
+# and must display different frames to change between them we must store them into a
+# dict after building them
+global Screens 
+Screens = {}
+# The data structure for the Screens dict is as follows:
+#
+# Screens = {
+#     "Initialization screen": {
+#         "Screen Frame": "Init_parent_frame",
+#         "Child frames": {}
+#         },
+# 
+#     "Experiment screen": {
+#         "Screen Frame": "Exper_parent_frame", 
+#         "Child frame": "Exper_child_frame_1"
+#         }
+# }
+#
+# Screens on the GUI are drawn with frames and stored as parent frames, these 
+# need to be erased and drawn whenever the user changes screens so we need to 
+# keep track of them in this dict, however sometimes the user will edit the 
+# number of entries on the screen and we'll need to erase and redraw only certain 
+# parts of the screen so we'll also keep these child frames on a child dict
+
+
+################################### Initialization Screen #########################
+# We create a frame that will contain everything under this screen, this frame will
+# be shown or hidden depending on what screen we want to display
+Initialization_screen = tk.Frame(main_window)
+
+Initialization_screen.grid(row=2, column=0, padx=10, pady=10)#, sticky="ew")
+third_label = tk.Label(Initialization_screen, text="Third row label Child", anchor="w")
+third_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
     
-    # Extract default configuration values for both devices from the configuration file
-    with open('Utils\default_config.json', "r") as json_file:
-        default_config = json.load(json_file)
 
-    default_values_delay_stage = default_config["Delay Stage Default Config Params"]
-    default_values_lockin = default_config["Lockin Default Config Params"]
+Screens["Initialization screen"] = {}
+Screens["Initialization screen"]["Screen frame"] = Initialization_screen
+Screens["Initialization screen"]["Child frame"] = None
 
 
+# Add text (label) prompting user to introduce configuration parameters
+label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
+label.grid(row=0, column=0, padx=10, pady=5)#, sticky="w")
 
-    ############################### Start drawing GUI ###############################
-    # Create the main window
-    global main_window
-    main_window = tk.Tk()
-    main_window.title("Automatic Pump Probe")
-    main_window.geometry("1920x1080")
+# The widgets will be placed in a grid with respect to each other,
+# to define their separation we define a "no place" x and y pad radius measured 10px around them
+# finally we specify "w" to format them to the left or west of their "cell"
+row_num = 0
+label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
-    # There are different screens (frames) in this GUI, each serves a different function 
-    # and must display different frames to change between them we must store them into a
-    # dict after building them
-    global Screens 
-    Screens = {}
-    # The data structure for the Screens dict is as follows:
-    #
-    # Screens = {
-    #     "Initialization screen": {
-    #         "Screen Frame": "Init_parent_frame",
-    #         "Child frames": {}
-    #         },
-    # 
-    #     "Experiment screen": {
-    #         "Screen Frame": "Exper_parent_frame", 
-    #         "Child frame": "Exper_child_frame_1"
-    #         }
-    # }
-    #
-    # Screens on the GUI are drawn with frames and stored as parent frames, these 
-    # need to be erased and drawn whenever the user changes screens so we need to 
-    # keep track of them in this dict, however sometimes the user will edit the 
-    # number of entries on the screen and we'll need to erase and redraw only certain 
-    # parts of the screen so we'll also keep these child frames on a child dict
+# Place an empty label at the end to add some space
+spacer = tk.Label(Initialization_screen, text="")  # An empty label
+spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
+row_num += 1
 
 
-    ################################### Initialization Screen #########################
-    # We create a frame that will contain everything under this screen, this frame will
-    # be shown or hidden depending on what screen we want to display
-    Initialization_screen = tk.Frame(main_window)
-    
-    Initialization_screen.grid(row=2, column=0, padx=10, pady=10)#, sticky="ew")
-    third_label = tk.Label(Initialization_screen, text="Third row label Child", anchor="w")
-    third_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-        
 
-    Screens["Initialization screen"] = {}
-    Screens["Initialization screen"]["Screen frame"] = Initialization_screen
-    Screens["Initialization screen"]["Child frame"] = None
+############################### Frame for delay stage ###############################
+# To create a section we use a frame which we will treat code wise as a window in which 
+# to place our widgets, this has the added benefit of referencing these widgets on a new subgrid, 
+# it's more modular too since we can rearrange the whole frame without loosing the reference
+# between widgets  
+
+# We place the frame indexing it to the initialization screen frame
+delay_parameters_frame = tk.Frame(Initialization_screen)
+delay_parameters_frame.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+
+row_num = 0
+label = tk.Label(delay_parameters_frame,  # Instead of placing the widget in the main window we now place it on the frame
+                    text="Delay stage parameters",
+                    anchor="w")
+label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+row_num += 1
 
 
-    # Add text (label) prompting user to introduce configuration parameters
-    label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
-    label.grid(row=0, column=0, padx=10, pady=5)#, sticky="w")
-    
-    # The widgets will be placed in a grid with respect to each other,
-    # to define their separation we define a "no place" x and y pad radius measured 10px around them
-    # finally we specify "w" to format them to the left or west of their "cell"
-    row_num = 0
+for parameter, default_value in default_values_delay_stage.items():
+
+    # For every parameter add a short description with a label 
+    label = tk.Label(delay_parameters_frame, text=parameter, anchor="w")
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
-    # Place an empty label at the end to add some space
-    spacer = tk.Label(Initialization_screen, text="")  # An empty label
-    spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
+    # Add an entry box for the user to write a parameter on the cell and place it to the right
+    entry = tk.Entry(delay_parameters_frame)
+    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+
+    # Fill entry box with the default value
+    entry.insert(0, str(default_value))
+
+    # Following labels and entry boxes will be written a row below
     row_num += 1
 
+# Spacing at the end of the section with empty labels
+spacer = tk.Label(delay_parameters_frame, text="")  # An empty label
+spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
 
 
-    ############################### Frame for delay stage ###############################
-    # To create a section we use a frame which we will treat code wise as a window in which 
-    # to place our widgets, this has the added benefit of referencing these widgets on a new subgrid, 
-    # it's more modular too since we can rearrange the whole frame without loosing the reference
-    # between widgets  
 
-    # We place the frame indexing it to the initialization screen frame
-    delay_parameters_frame = tk.Frame(Initialization_screen)
-    delay_parameters_frame.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+############################### Frame for lockin ###############################
+# Repeat for lockin parameters
+lockin_parameters_frame = tk.Frame(Initialization_screen)
+lockin_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
 
-    row_num = 0
-    label = tk.Label(delay_parameters_frame,  # Instead of placing the widget in the main window we now place it on the frame
-                     text="Delay stage parameters",
-                     anchor="w")
+row_num = 0
+label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
+label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+row_num += 1
+
+# Add labels in succession
+for parameter, default_value in default_values_lockin.items():
+
+    # For every parameter the user will input add a short description with a label 
+    label = tk.Label(lockin_parameters_frame, text=parameter, anchor="w")
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+
+    # Add an entry box for the user to write a parameter on the cell and place it to the right
+    entry = tk.Entry(lockin_parameters_frame)
+    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+
+    # Fill entry box with the default value
+    entry.insert(0, str(default_value))
+
+    # Following labels and entry boxes will be written a row below
     row_num += 1
 
-    
-    for parameter, default_value in default_values_delay_stage.items():
-
-        # For every parameter add a short description with a label 
-        label = tk.Label(delay_parameters_frame, text=parameter, anchor="w")
-        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-
-        # Add an entry box for the user to write a parameter on the cell and place it to the right
-        entry = tk.Entry(delay_parameters_frame)
-        entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
-
-        # Fill entry box with the default value
-        entry.insert(0, str(default_value))
-
-        # Following labels and entry boxes will be written a row below
-        row_num += 1
-
-    # Spacing at the end of the section with empty labels
-    spacer = tk.Label(delay_parameters_frame, text="")  # An empty label
-    spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
-
-    
-    
-    ############################### Frame for lockin ###############################
-    # Repeat for lockin parameters
-    lockin_parameters_frame = tk.Frame(Initialization_screen)
-    lockin_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
-
-    row_num = 0
-    label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
-    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-    row_num += 1
-
-    # Add labels in succession
-    for parameter, default_value in default_values_lockin.items():
-
-        # For every parameter the user will input add a short description with a label 
-        label = tk.Label(lockin_parameters_frame, text=parameter, anchor="w")
-        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-
-        # Add an entry box for the user to write a parameter on the cell and place it to the right
-        entry = tk.Entry(lockin_parameters_frame)
-        entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
-
-        # Fill entry box with the default value
-        entry.insert(0, str(default_value))
-
-        # Following labels and entry boxes will be written a row below
-        row_num += 1
-    
-    # This button initializes the devices prior to running the experiment
-    button = tk.Button(Initialization_screen, text="Initialize devices", command=initialize_button)
-    button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
-
-
-    
-
-    ################################### Experiment Configuration Screen #########################
-    # This screen holds the parameters to configure the experiment and visualize it
-    Experiment_screen = tk.Frame(main_window)
-    Screens["Experiment screen"] = {}
-    Screens["Experiment screen"]["Screen frame"] = Experiment_screen
-
-    # Load experiment configuration parameters
-    with open('Utils\experiment_preset.json', "r") as json_file:
-        experiment_preset = json.load(json_file)
-
-    # Create a frame for the entries alone so we can overwrite them when the user decides to add legs to the trip
-    Entries_frame = tk.Frame(Experiment_screen)
-
-    # We store this frame as a child frame of the Experiment screen frame
-    Screens["Experiment screen"]["Child frame"] = Entries_frame
-
-    # Initially we draw the GUI for the input loaded from the experiment preset into a dict
-    create_experiment_gui_from_dict(experiment_preset)
-
-    # We now ask the user if they want to edit the number of legs on the trip
-    button = tk.Button(Experiment_screen, text="Edit number of trip legs", command=edit_trip_legs)
-    button.grid(row=0, column=1, padx=10, pady=5, sticky="w")
-
-    # Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
-    button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
-    button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
-
-    # Inform user of expected experiment time before launching experiment
-    button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=estimate_experiment_timespan)
-    button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
-
-    # This button launches a scan
-    button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, entries, experiment_data_queue))
-    button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
-
-
-
-    ################################### Top bar ###################################    
-    # Drop down menu to select different screens
-    menu_var = tk.StringVar(value="Initialization screen")  # Default value
-    screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
-    screen_menu.grid(row=0, column=0, padx=0, pady=0, sticky="w")
-
-    # Add a horizontal line (separator) below the dropdown menu
-    separator = ttk.Separator(main_window, orient="horizontal")
-    separator.grid(row=1, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
-    
-    # Run first to show default screen when loading
-    show_screen(screen_name="Initialization screen", frame_type="Screen frame")
-
-    # Ensure row 0 and row 1 stay fixed
-    main_window.grid_rowconfigure(0, weight=0)
-    main_window.grid_rowconfigure(1, weight=0)
-
-    # Ensure row 2 (Initialization_screen) expands properly
-    main_window.grid_rowconfigure(2, weight=0)
-    main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
-
-    # Call the main window to draw the GUI
-    main_window.mainloop()
+# This button initializes the devices prior to running the experiment
+button = tk.Button(Initialization_screen, text="Initialize devices", command=initialize_button)
+button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 
 
 
 
+################################### Experiment Configuration Screen #########################
+# This screen holds the parameters to configure the experiment and visualize it
+Experiment_screen = tk.Frame(main_window)
+Screens["Experiment screen"] = {}
+Screens["Experiment screen"]["Screen frame"] = Experiment_screen
+
+# Load experiment configuration parameters
+with open('Utils\experiment_preset.json', "r") as json_file:
+    experiment_preset = json.load(json_file)
+
+# Create a frame for the entries alone so we can overwrite them when the user decides to add legs to the trip
+Entries_frame = tk.Frame(Experiment_screen)
+
+# We store this frame as a child frame of the Experiment screen frame
+Screens["Experiment screen"]["Child frame"] = Entries_frame
+
+# Initially we draw the GUI for the input loaded from the experiment preset into a dict
+create_experiment_gui_from_dict(experiment_preset)
+
+# We now ask the user if they want to edit the number of legs on the trip
+button = tk.Button(Experiment_screen, text="Edit number of trip legs", command=edit_trip_legs)
+button.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+
+# Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
+button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
+button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+
+# Inform user of expected experiment time before launching experiment
+button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=estimate_experiment_timespan)
+button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
+
+# This button launches a scan
+button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, experiment_data_queue))
+button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
 
-############################### Divide program in threads ###############################
-# If we try to run the core logic functions to manage the experiment along the GUI 
-# functions we won't be able to do it simultaneously unless we divide them into threads
-GUI_thread = threading.Thread(target=GUI)
 
-# Start the main window thread to draw the GUI
-GUI_thread.start()
-GUI_thread.join() # I probably have to join this with a close button or something
+################################### Top bar ###################################    
+# Drop down menu to select different screens
+menu_var = tk.StringVar(value="Initialization screen")  # Default value
+screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
+screen_menu.grid(row=0, column=0, padx=0, pady=0, sticky="w")
 
+# Add a horizontal line (separator) below the dropdown menu
+separator = ttk.Separator(main_window, orient="horizontal")
+separator.grid(row=1, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
 
+# Run first to show default screen when loading
+show_screen(screen_name="Initialization screen", frame_type="Screen frame")
+
+# Ensure row 0 and row 1 stay fixed
+main_window.grid_rowconfigure(0, weight=0)
+main_window.grid_rowconfigure(1, weight=0)
+
+# Ensure row 2 (Initialization_screen) expands properly
+main_window.grid_rowconfigure(2, weight=0)
+main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
+
+# Call the main window to draw the GUI
+main_window.mainloop()
