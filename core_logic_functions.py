@@ -118,13 +118,17 @@ def evaluate_status_bits(serial_num, channel, lib):
             print(f"{description_0}")  # Bit is not set
 
 
-def move_to_position(lib, serial_num, channel, position_ps):
+def move_to_position(lib, serial_num, channel, delay_ps):
     
     # Convert position from picoseconds to real units [mm]
     light_speed_vacuum = 299792458 # m/s
     refraction_index_air = 1.0003
     ps_to_mm = light_speed_vacuum / (refraction_index_air * (1E9))
-    position = position_ps * ps_to_mm
+    distance_mm = delay_ps * ps_to_mm
+
+    # Since light moves back and forth through the delay stage 
+    # the position the stage needs to travel to is only half the distance
+    position = distance_mm / 2
 
     # Convert from real units to device units [steps]
     new_pos_real = c_double(position)  # in real units

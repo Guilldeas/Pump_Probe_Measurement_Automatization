@@ -15,27 +15,25 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
 
-# TO DO list: From most to least important
-#   · Save graph at the end
-#   · Specify time zero
+# TO DO list revised by Ankit: (Deadline: 31st of March)
+#   · Read from buffer instead to avoid saturation
+#   · Safely close program even when experiment is taking place (abort button)
 #   · Scrollbar for legs list
-#   · Save at every point or just at the end option
+#   · Allow user to zoom into the graph while the experiment takes place
+#   · Errors should not fail silently (at least throw an error window)
+#   · Choose number of scans and show in graph the different scans OR a hold button where 
+#     you the previous data also shows in the plot with a legend
 #
 # Less important TO DO list: No order in particular
-#   · Safely close program even when experiment is taking place (abort button)
-#   · Add boolean flags to experiment that exchange speed for acquracy (measure noise at every step,
-#     autogain at every step...)
 #   · Choose settling precission or at least verify
-#   · Add error bars to saved data
-#   · Errors should not fail silently (at east throw an error window)
 #   · Define waiting time and number of pulses averaged and store in csv
 #   · If OVERLOAD then AUTOGAIN else proceed
-#   · Appropiately measure time estimation
-#   · Add comment header to CSV
 #   · Implement loading different experiment presets, right now there only one, default, and the 
 #     user overwrites it to save a preset.
 #   · Move functions on GUI.py to their own library
-
+#   · Add boolean flags to experiment that exchange speed for acquracy (measure noise at every step,
+#     autogain at every step...) Maybe just remove measuring the error
+#   · Add comment header to CSV
 
 
 ############################### Global variables ###############################

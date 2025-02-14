@@ -392,7 +392,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, fig):
             startup_timestamp = time.time()
 
         print(f"Measurement at step: {index+1} of {len(Positions)}")
-        position_ps = clfun.move_to_position(lib, serial_num, channel, position_ps=Positions[index])   # Move
+        position_ps = clfun.move_to_position(lib, serial_num, channel, delay_ps=Positions[index])   # Move
         print(f"    ·Delay set to {round(position_ps - time_zero, 2)}ps")
 
         # For every function ran in the loop we store how much time it takes to run it
