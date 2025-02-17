@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 # TO DO list revised by Ankit: (Deadline: 31st of March)
 #   · Read from buffer instead to avoid saturation
 #   · Safely close program even when experiment is taking place (abort button)
-#   · Scrollbar for legs list
 #   · Allow user to zoom into the graph while the experiment takes place
 #   · Errors should not fail silently (at least throw an error window)
 #   · Choose number of scans and show in graph the different scans OR a hold button where 
@@ -34,6 +33,11 @@ import matplotlib.pyplot as plt
 #   · Add boolean flags to experiment that exchange speed for acquracy (measure noise at every step,
 #     autogain at every step...) Maybe just remove measuring the error
 #   · Add comment header to CSV
+#
+#
+# User Notes:
+#   · Changing Windows font can hide some widgets! This GUI was designed for default windows screen parameters
+ 
 
 
 ############################### Global variables ###############################
@@ -43,6 +47,7 @@ import matplotlib.pyplot as plt
 # initialization is taking place
 initialized = False
 entries = {}
+previous_scans = []
 
 # Create a queue object to send data from experiment thread back 
 experiment_data_queue = Queue()
@@ -147,8 +152,22 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, fig):
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.perform_experiment(parameters_dict, experiment_data_queue, fig)
-        #core_logic.perform_experiment_dummy(Troubleshooting=False)
+        for scan in range(0, 3):
+
+            # Perform experiment and get data at the end
+            data_df = core_logic.perform_experiment(parameters_dict, experiment_data_queue, fig, scan)
+
+            # We append the label for this experiment to the dataframe to 
+            # use it as a label when graphing
+            data_dict = data_df.to_dict()
+            data_dict["Scan number"] = scan          
+
+            # Preserve data from previous scans to graph with 
+            global previous_scans
+            previous_scans.append(data_dict)
+
+            #core_logic.perform_experiment_dummy(Troubleshooting=False)
+
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -374,7 +393,7 @@ def launch_experiment(experiment_data_queue):
     global entries
 
     if not initialized:
-        messagebox.showinfo("Error launching experiment", "Please wait for device initialization to complete before launching experiment")
+        messagebox.showinfo("Error launching experiment", "Please start/wait for device initialization to complete before launching experiment")
         return
 
     # First we'll verify parameters are safe before launching the experiment
@@ -467,11 +486,14 @@ def launch_experiment(experiment_data_queue):
 
         # Function to check for updates from the queue
         def check_for_updates():
+
+            global previous_scans
+            
             while not output_queue.empty():
                 new_message = output_queue.get()
                 listbox.insert(tk.END, new_message)
                 listbox.see(tk.END)  # Auto-scroll to the bottom
-
+            
             # Update GUI as long as the experiment is taking place
             if experiment_thread.is_alive():
 
@@ -488,18 +510,30 @@ def launch_experiment(experiment_data_queue):
                     axes.clear()
                     axes.set_xlabel('t [ps]')
                     axes.set_ylabel('PD [Vrms]')
-                    axes.plot(positions[:len(photodiode_data)], photodiode_data, linestyle='-', color="black")
+                    axes.plot(positions[:len(photodiode_data)], photodiode_data, linestyle='-', color="black", label="current scan")
                     axes.errorbar(positions[:len(photodiode_data)], photodiode_data, yerr=photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
 
+                    # Graph data for previous scans aswell
+                    for prev_scan in previous_scans:
+
+                        # I know this is ugly af, I just pray to God that you don't actually have to 
+                        # troubleshoot the code I wrote today :/ 
+                        prev_positions = list(prev_scan["Time [ps]"].values())
+                        prev_photodiode_data = list(prev_scan["Voltage from PD [Vrms]"].values())
+                        prev_photodiode_data_errors = list(prev_scan["PD error [Vrms]"].values())
+                        prev_photodiode_data_errors = list(prev_scan["PD error [Vrms]"].values())
+                        scan_number = prev_scan["Scan number"]
+
+                        axes.plot(prev_positions, prev_photodiode_data, linestyle='-', label=str("scan number" + str(scan_number)))
+                        axes.errorbar(prev_positions, prev_photodiode_data, yerr=prev_photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
+
+
                     # Fix X-Axis and adjust Y-axis dynamically with some extra space
-                    if min(positions) >= 0:
-                        axes.set_xlim(0.9*min(positions), 1.1*max(positions))
-
-                    if min(positions) < 0:
-                        axes.set_xlim(1.1*min(positions), 1.1*max(positions))
-
+                    axes.set_xlim(min(positions) - 0.15*abs(min(positions)), max(positions) + 0.15*abs(max(positions)))
                     if len(photodiode_data) > 1:
                         axes.set_ylim(0.5*min(photodiode_data), 1.5*max(photodiode_data))
+
+                    plt.legend(loc="upper left")
 
                     # Redraw Canvas
                     canvas.draw()
@@ -511,6 +545,9 @@ def launch_experiment(experiment_data_queue):
             else:
                 experiment_thread.join()
                 label.config(text="Experiment completed")
+
+                # Clear previous data
+                previous_scans = []
 
                 # Add button to close window
                 button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
@@ -658,14 +695,14 @@ def create_experiment_gui_from_dict(parameters_dict):
 
     # Add a Scrollbar and link it to the Canvas
     scrollbar = tk.Scrollbar(experiment_parameters_frame, orient=tk.VERTICAL, command=canvas_legs.yview)
-    scrollbar.grid(row=row_num, column=1, sticky="ns")  # Attach scrollbar to the right
+    scrollbar.grid(row=row_num, column=1, padx=10, pady=10, sticky="ns")  # Attach scrollbar to the right
 
     # Configure Canvas to use scrollbar
     canvas_legs.configure(yscrollcommand=scrollbar.set)
 
     # Create a Frame inside the Canvas (this will be the scrollable area)
     scrollable_frame = tk.Frame(canvas_legs)
-    scrollable_frame.grid(row=row_num, column=0, sticky="nsew")
+    scrollable_frame.grid(row=row_num, column=0, padx=10, pady=10, sticky="nsew")
 
     canvas_legs.create_window((0, 0), window=scrollable_frame, anchor="nw")
 

@@ -299,7 +299,10 @@ def request_time_constant(start_position, end_position, step_size):
 
     
     
-def perform_experiment(parameters_dict, experiment_data_queue, fig):
+def perform_experiment(parameters_dict, experiment_data_queue, fig, scan):
+
+    print("------------------------------------------")
+    print(f"Scan number {scan}")
 
     # The input dict contains information for each leg of the trip
     time_constant = parameters_dict["time_constant"]
@@ -384,7 +387,6 @@ def perform_experiment(parameters_dict, experiment_data_queue, fig):
         total = []
 
     ########################### Scan and Measure at list of positions ###########################
-    
     for index in range(0, len(Positions)):
 
         # Rgister the timestamp when the iteration starts
@@ -493,7 +495,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, fig):
     print(f"Writting CSV file")
 
     # Create a DataFrame with headers
-    df = pd.DataFrame({
+    data_df = pd.DataFrame({
         "Time [ps]": Positions_relative,
         "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
         "Voltage from PD [Vrms]": Photodiode_data,
@@ -506,10 +508,13 @@ def perform_experiment(parameters_dict, experiment_data_queue, fig):
     # Create a subfolder at Output to store the experiment data
     experiment_name = parameters_dict["experiment_name"]
     data_folder = os.path.join(output_folder, experiment_name)
-    data_folder = os.path.join(data_folder, date_string)
-    os.makedirs(data_folder)
+    data_folder = os.path.join(data_folder, str("scan_number_" + str(scan)))
+    
+    # Only create the data folder if it does not exist
+    if not os.path.exists(data_folder):
+        os.makedirs(data_folder)
 
-    file_name = parameters_dict["experiment_name"] + ".csv"
+    file_name = parameters_dict["experiment_name"]  + "_scan_number_" + str(scan) + ".csv"
     file_path = os.path.join(data_folder, file_name)
 
     # Create a string storing relevant experiment data
@@ -522,12 +527,14 @@ def perform_experiment(parameters_dict, experiment_data_queue, fig):
         file.write(f"# {experiment_params}\n")  
 
     # Append the rest of the data to the csv
-    df.to_csv(file_path, index=False, mode="a", lineterminator="\n")
+    data_df.to_csv(file_path, index=False, mode="a", lineterminator="\n")
 
     # Save live graph aswell
-    file_name = parameters_dict["experiment_name"] + ".png"
+    file_name = parameters_dict["experiment_name"] + "_scan_number_" + str(scan) + ".png"
     file_path = os.path.join(data_folder, file_name)
     fig.savefig(file_path, dpi=300)  # Save with high resolution
+
+    return data_df
 
 
 

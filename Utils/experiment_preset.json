@@ -1,1 +1,1 @@
-{"experiment_name": "new_experiment", "time_constant": "1.0", "time_zero": "0.0", "trip_legs": {"0": {"start [ps]": 0.0, "end [ps]": 100.0, "step [ps]": 1.0}, "1": {"start [ps]": 800.0, "end [ps]": 1000.0, "step [ps]": 10.0}, "2": {"start [ps]": 1500.0, "end [ps]": 2000.0, "step [ps]": 200.0}, "3": {"start [ps]": 2000.0, "end [ps]": 3000.0, "step [ps]": 1.0}}}
+{"experiment_name": "new_experiment", "time_constant": "1.0", "time_zero": "1000.0", "trip_legs": {"0": {"start [ps]": 0.0, "end [ps]": 100.0, "step [ps]": 50.0}}}
