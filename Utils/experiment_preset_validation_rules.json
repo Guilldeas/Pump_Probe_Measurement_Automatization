@@ -1,6 +1,6 @@
 {
-    "start [ps]": {"type": "float", "max": 2001.0, "min": 0.0}, 
-    "end [ps]": {"type": "float", "max": 2001.0, "min": 0.0}, 
-    "step [ps]": {"type": "float", "max": 2001.0, "min": 3.34E-4}, 
+    "start [ps]": {"type": "float", "max": 4002.0, "min": 0.0}, 
+    "end [ps]": {"type": "float", "max": 4002.0, "min": 0.0}, 
+    "step [ps]": {"type": "float", "max": 4002.0, "min": 6.68E-4}, 
     "experiment_title": {}
 }

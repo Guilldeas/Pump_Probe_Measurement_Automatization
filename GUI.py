@@ -647,6 +647,34 @@ def create_experiment_gui_from_dict(parameters_dict):
     entries["time_zero"] = entry
     row_num += 1
 
+    # We now create the scrollable area holding the leg parameters
+
+    # Create a Canvas widget inside out parameters frame
+    canvas_legs = tk.Canvas(experiment_parameters_frame)
+    canvas_legs.grid(row=row_num, column=0, sticky="nsew")  # Fill entire grid cell
+
+    # Add a Scrollbar and link it to the Canvas
+    scrollbar = tk.Scrollbar(experiment_parameters_frame, orient=tk.VERTICAL, command=canvas_legs.yview)
+    scrollbar.grid(row=row_num, column=1, sticky="ns")  # Attach scrollbar to the right
+
+    # Configure Canvas to use scrollbar
+    canvas_legs.configure(yscrollcommand=scrollbar.set)
+
+    # Create a Frame inside the Canvas (this will be the scrollable area)
+    scrollable_frame = tk.Frame(canvas_legs)
+    scrollable_frame.grid(row=row_num, column=0, sticky="nsew")
+
+    canvas_legs.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+    # Function to update scroll region
+    def update_scroll_region(event=None):
+        canvas_legs.configure(scrollregion=canvas_legs.bbox("all"))
+
+    # Bind resizing event
+    scrollable_frame.bind("<Configure>", update_scroll_region)
+
+    
+    # Now that the frame is scrollable we fill it with leg parameters
 
     trip_legs_entries = {}
     # trip_legs is a dict storing each leg with it's corresponding parameters
@@ -656,7 +684,7 @@ def create_experiment_gui_from_dict(parameters_dict):
         trip_leg_entry = {}
 
         # Label at the start the number for the leg
-        label = tk.Label(experiment_parameters_frame, text=f"leg number {leg_number}", anchor="w")
+        label = tk.Label(scrollable_frame, text=f"leg number {leg_number}", anchor="w")
         label.grid(row=row_num, column=0, padx=10, pady=15, sticky="w")
         row_num += 1
 
@@ -664,11 +692,11 @@ def create_experiment_gui_from_dict(parameters_dict):
         for parameter, default_value in leg_parameters.items():
 
             # For every parameter the user will input add a short description with a label 
-            label = tk.Label(experiment_parameters_frame, text=parameter, anchor="w")
+            label = tk.Label(scrollable_frame, text=parameter, anchor="w")
             label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
             # Add an entry box for the user to write a parameter on the cell and place it to the right
-            entry = tk.Entry(experiment_parameters_frame)
+            entry = tk.Entry(scrollable_frame)
             entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
 
             # Fill entry box with the default value
@@ -690,6 +718,7 @@ def create_experiment_gui_from_dict(parameters_dict):
 
     # Show frames at the end
     experiment_parameters_frame.grid(row=2, column=0, sticky="ew")
+
     
 
 
@@ -736,7 +765,7 @@ default_values_lockin = default_config["Lockin Default Config Params"]
 global main_window
 main_window = tk.Tk()
 main_window.title("Automatic Pump Probe")
-main_window.geometry("1920x1080")
+main_window.geometry("1200x550")
 
 # There are different screens (frames) in this GUI, each serves a different function 
 # and must display different frames to change between them we must store them into a
