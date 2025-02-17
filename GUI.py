@@ -15,27 +15,25 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
 
-# TO DO list: From most to least important
-#   · Save graph at the end
-#   · Specify time zero
+# TO DO list revised by Ankit: (Deadline: 31st of March)
+#   · Read from buffer instead to avoid saturation
+#   · Safely close program even when experiment is taking place (abort button)
 #   · Scrollbar for legs list
-#   · Save at every point or just at the end option
+#   · Allow user to zoom into the graph while the experiment takes place
+#   · Errors should not fail silently (at least throw an error window)
+#   · Choose number of scans and show in graph the different scans OR a hold button where 
+#     you the previous data also shows in the plot with a legend
 #
 # Less important TO DO list: No order in particular
-#   · Safely close program even when experiment is taking place (abort button)
-#   · Add boolean flags to experiment that exchange speed for acquracy (measure noise at every step,
-#     autogain at every step...)
 #   · Choose settling precission or at least verify
-#   · Add error bars to saved data
-#   · Errors should not fail silently (at east throw an error window)
 #   · Define waiting time and number of pulses averaged and store in csv
 #   · If OVERLOAD then AUTOGAIN else proceed
-#   · Appropiately measure time estimation
-#   · Add comment header to CSV
 #   · Implement loading different experiment presets, right now there only one, default, and the 
 #     user overwrites it to save a preset.
 #   · Move functions on GUI.py to their own library
-
+#   · Add boolean flags to experiment that exchange speed for acquracy (measure noise at every step,
+#     autogain at every step...) Maybe just remove measuring the error
+#   · Add comment header to CSV
 
 
 ############################### Global variables ###############################
@@ -46,8 +44,7 @@ import matplotlib.pyplot as plt
 initialized = False
 entries = {}
 
-# Create a queue object to send data from 
-# experiment thread back 
+# Create a queue object to send data from experiment thread back 
 experiment_data_queue = Queue()
 
 
@@ -136,8 +133,8 @@ def initialization_thread_logic():
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.initialization(Troubleshooting=False)
-        core_logic.initialization_dummy(Troubleshooting=False)
+        core_logic.initialization(Troubleshooting=False)
+        #core_logic.initialization_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -145,13 +142,13 @@ def initialization_thread_logic():
 
 
 
-def experiment_thread_logic(parameters_dict, experiment_data_queue):
+def experiment_thread_logic(parameters_dict, experiment_data_queue, fig):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        #core_logic.perform_experiment(parameters_dict, experiment_data_queue)
-        core_logic.perform_experiment_dummy(Troubleshooting=False)
+        core_logic.perform_experiment(parameters_dict, experiment_data_queue, fig)
+        #core_logic.perform_experiment_dummy(Troubleshooting=False)
     except Exception as e:
         print(f"Error: {e}")  # Will be captured and displayed in GUI
     finally:
@@ -388,7 +385,8 @@ def launch_experiment(experiment_data_queue):
     # Construct a dict that will store the parsed verified data to later feed to the delay stage
     experiment_parameters = {
         "experiment_name": entries["experiment_name"].get(), 
-        "time_constant": float(entries["time_constant"].get())
+        "time_constant": float(entries["time_constant"].get()),
+        "time_zero":float(entries["time_zero"].get())
         }
     
     trip_legs_parsed = {}
@@ -427,7 +425,7 @@ def launch_experiment(experiment_data_queue):
 
         # Place widgets using grid
         listbox.grid(row=0, column=0, sticky="ew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        scrollbar.grid(padx=20, pady=20, row=0, column=1, sticky="ns")
 
         # Configure scrollbar
         listbox.config(yscrollcommand=scrollbar.set)
@@ -450,7 +448,7 @@ def launch_experiment(experiment_data_queue):
 
         # Frame for Graph
         graph_frame = tk.Frame(monitoring_window)
-        graph_frame.grid(row=0, column=2, sticky="ew")
+        graph_frame.grid(padx=20, pady=20, row=0, column=2, sticky="ew")
 
         # Canvas for Matplotlib
         canvas = FigureCanvasTkAgg(fig, master=graph_frame)
@@ -464,7 +462,7 @@ def launch_experiment(experiment_data_queue):
 
         # Run experiment on a different thread
         experiment_thread = threading.Thread(target=experiment_thread_logic, 
-                                                args=(experiment_parameters, experiment_data_queue))
+                                                args=(experiment_parameters, experiment_data_queue, fig))
         experiment_thread.start()
 
         # Function to check for updates from the queue
@@ -490,11 +488,16 @@ def launch_experiment(experiment_data_queue):
                     axes.clear()
                     axes.set_xlabel('t [ps]')
                     axes.set_ylabel('PD [Vrms]')
-                    axes.plot(positions[:len(photodiode_data)], photodiode_data, marker='o', linestyle='-', color="black")
+                    axes.plot(positions[:len(photodiode_data)], photodiode_data, linestyle='-', color="black")
                     axes.errorbar(positions[:len(photodiode_data)], photodiode_data, yerr=photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
 
                     # Fix X-Axis and adjust Y-axis dynamically with some extra space
-                    axes.set_xlim(0.9*min(positions), 1.1*max(positions))
+                    if min(positions) >= 0:
+                        axes.set_xlim(0.9*min(positions), 1.1*max(positions))
+
+                    if min(positions) < 0:
+                        axes.set_xlim(1.1*min(positions), 1.1*max(positions))
+
                     if len(photodiode_data) > 1:
                         axes.set_ylim(0.5*min(photodiode_data), 1.5*max(photodiode_data))
 
