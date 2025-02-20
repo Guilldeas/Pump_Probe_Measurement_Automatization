@@ -299,7 +299,7 @@ def request_time_constant(start_position, end_position, step_size):
 
     
     
-def perform_experiment(parameters_dict, experiment_data_queue, fig, scan):
+def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan):
 
     print("------------------------------------------")
     print(f"Scan number {scan}")
@@ -388,8 +388,22 @@ def perform_experiment(parameters_dict, experiment_data_queue, fig, scan):
 
     ########################### Scan and Measure at list of positions ###########################
     for index in range(0, len(Positions)):
-
-        # Rgister the timestamp when the iteration starts
+        
+        # Evaluate whether the user has pressed the abort button on the GUI
+        try:
+            abort_experiment = abort_queue.get_nowait()
+        
+        # Throws an error when queue is empty
+        except:
+            abort_experiment = False
+        
+        if abort_experiment:
+            
+            # Return an error code to let experiment_thread_logic() there is no data to store
+            # and we should close the GUI
+            return 1
+        
+        # Register the timestamp when the iteration starts
         if profiling:
             startup_timestamp = time.time()
 

@@ -11,17 +11,15 @@ from queue import Queue
 from functools import partial
 from math import ceil
 from tkinter import simpledialog
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.pyplot as plt
+import os
 
 
 # TO DO list revised by Ankit: (Deadline: 31st of March)
 #   · Read from buffer instead to avoid saturation
-#   · Safely close program even when experiment is taking place (abort button)
 #   · Allow user to zoom into the graph while the experiment takes place
 #   · Errors should not fail silently (at least throw an error window)
-#   · Choose number of scans and show in graph the different scans OR a hold button where 
-#     you the previous data also shows in the plot with a legend
 #
 # Less important TO DO list: No order in particular
 #   · Choose settling precission or at least verify
@@ -37,6 +35,7 @@ import matplotlib.pyplot as plt
 #
 # User Notes:
 #   · Changing Windows font can hide some widgets! This GUI was designed for default windows screen parameters
+#   · Launching an experiment with the same name as a previous experiment will overwrite it
  
 
 
@@ -51,7 +50,7 @@ previous_scans = []
 
 # Create a queue object to send data from experiment thread back 
 experiment_data_queue = Queue()
-
+abort_queue = Queue()
 
 def show_screen_from_menu(screen_name):
     """ Wrapper function to use `show_screen` inside OptionMenu """
@@ -147,24 +146,33 @@ def initialization_thread_logic():
 
 
 
-def experiment_thread_logic(parameters_dict, experiment_data_queue, fig):
+def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue, fig, num_scans):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        for scan in range(0, 3):
+        for scan in range(0, num_scans):
 
             # Perform experiment and get data at the end
-            data_df = core_logic.perform_experiment(parameters_dict, experiment_data_queue, fig, scan)
+            abort_queue.put(False)  # before we start the experiment we reset the abort flag to false
+            result = core_logic.perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan)
 
-            # We append the label for this experiment to the dataframe to 
-            # use it as a label when graphing
-            data_dict = data_df.to_dict()
-            data_dict["Scan number"] = scan          
+            # User has chosen to abort experiment and thus we receive an error code instead
+            if isinstance(result, int):
+                restore_output()
+                return None
 
-            # Preserve data from previous scans to graph with 
-            global previous_scans
-            previous_scans.append(data_dict)
+            # The scan completed and we store it to compare against the new scan
+            else:
+                # We append the label for this experiment to the dataframe to 
+                # use it as a label when graphing
+                data_df = result
+                data_dict = data_df.to_dict()
+                data_dict["Scan number"] = scan          
+
+                # Preserve data from previous scans to graph with 
+                global previous_scans
+                previous_scans.append(data_dict)
 
             #core_logic.perform_experiment_dummy(Troubleshooting=False)
 
@@ -180,8 +188,7 @@ def initialize_button():
     # Create the waiting window
     waiting_window = Toplevel(main_window)
     waiting_window.title("Initializing Devices")
-    waiting_window.geometry("800x300")
-    waiting_window.resizable(True, True)
+    waiting_window.geometry("450x300")
     #waiting_window.grab_set()  # Make it modal (blocks interaction with other windows)
 
     # Create a Listbox to display initialization messages
@@ -376,7 +383,8 @@ def save_parameters(experiment_preset):
     # Finally we construct a dict to save it by getting the parameters from screen that don't need to save the validated
     experiment_preset_save["experiment_name"] = entries["experiment_name"].get()
     experiment_preset_save["time_constant"] = entries["time_constant"].get()
-    experiment_preset_save["time_zero"] = entries["time_zero"].get()
+    experiment_preset_save["time_zero"] = float(entries["time_zero"].get())
+    experiment_preset_save["num_scans"] = int(entries["num_scans"].get())
     experiment_preset_save["trip_legs"] = trip_legs_save
     
     # After all tests have passed we save them into a json
@@ -396,7 +404,7 @@ def launch_experiment(experiment_data_queue):
         messagebox.showinfo("Error launching experiment", "Please start/wait for device initialization to complete before launching experiment")
         return
 
-    # First we'll verify parameters are safe before launching the experiment
+    ### First we'll verify parameters are safe before launching the experiment
     
     # Extract references to data we wanna validate
     Legs_entries = entries["trip_legs"]
@@ -405,7 +413,8 @@ def launch_experiment(experiment_data_queue):
     experiment_parameters = {
         "experiment_name": entries["experiment_name"].get(), 
         "time_constant": float(entries["time_constant"].get()),
-        "time_zero":float(entries["time_zero"].get())
+        "time_zero":float(entries["time_zero"].get()),
+        "num_scans":int(entries["num_scans"].get()) 
         }
     
     trip_legs_parsed = {}
@@ -424,19 +433,35 @@ def launch_experiment(experiment_data_queue):
             return
     
     experiment_parameters["trip_legs"] = trip_legs_parsed
-        
-    # Once parameters are verified and parsed we proceed with the experiment launch
+
+    # Then we check whether an output folder of the same name is in danger of being overwritten
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    output_folder = os.path.join(current_dir, "Output")
+    data_folder = os.path.join(output_folder, entries["experiment_name"].get())
+
+    if os.path.exists(data_folder):
+
+        response = messagebox.askokcancel("Warning", "Choosing the same experiment file name will overwrite the data for the previous experiment with the same name\nDo you wish to continue?")
+
+        # User clicked "Cancel" and we abort the experiment 
+        if not response:  
+            return 
+            
+
+    ### Once parameters are verified and parsed we proceed with the experiment launch
 
     # Catch exceptions while performing the experiment 
     try:
-        # Create a window to monitor experiment
+        ### Create a window to monitor experiment
         monitoring_window = Toplevel(main_window)
         monitoring_window.title("Experiment in progress")
-        monitoring_window.geometry("1800x600")
+        monitoring_window.geometry("1200x800")
         monitoring_window.resizable(True, True)
         monitoring_window.grab_set()  # Make it modal (blocks interaction with other windows)
 
-        # Create scrollable log
+
+
+        ### Create scrollable log
 
         # Create a Listbox to display initialization messages
         listbox = tk.Listbox(monitoring_window, selectmode=tk.SINGLE, height=15)
@@ -458,7 +483,9 @@ def launch_experiment(experiment_data_queue):
         label = tk.Label(monitoring_window, text="Please wait while the experiment takes place...")
         label.grid(padx=20, pady=20)
 
-        # Create live graph
+
+
+        ### Create live graph
 
         # Create figure and axes
         fig, axes = plt.subplots()
@@ -473,6 +500,32 @@ def launch_experiment(experiment_data_queue):
         canvas = FigureCanvasTkAgg(fig, master=graph_frame)
         canvas.get_tk_widget().grid(row=0, column=0, sticky="ew")
 
+        # Add Navigation Toolbar for Zoom and Scroll on it's own 
+        # toolbar because NavigationToolbar2Tk() internally uses pack() which conflicts
+        # with the rest of my code which uses grid()
+        toolbar_frame = tk.Frame(graph_frame)
+        toolbar_frame.grid(row=1, column=0, sticky="ew")
+
+        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+        toolbar.update()
+        toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        #toolbar = NavigationToolbar2Tk(canvas, graph_frame)
+        #toolbar.update()
+        #toolbar.grid(row=1, column=0, sticky="ew")
+
+
+        ### Create a button to abort experiment by changing the following flag
+        # Launch experiment will check this global flag at each loop
+        def abort_experiment():
+            messagebox.showinfo("Wait", f"Aborting experiment\nPlease wait while experiment closes safely")
+            abort_queue.put(True)
+
+        button = tk.Button(monitoring_window, text="Abort experiment", command=abort_experiment)
+        button.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+
+
+
         # Queue for reading prints from core_logic functions and displaying them on listbox
         output_queue = Queue()
 
@@ -480,8 +533,9 @@ def launch_experiment(experiment_data_queue):
         capture_output(output_queue)
 
         # Run experiment on a different thread
+        num_scans = int(entries["num_scans"].get())
         experiment_thread = threading.Thread(target=experiment_thread_logic, 
-                                                args=(experiment_parameters, experiment_data_queue, fig))
+                                                args=(experiment_parameters, experiment_data_queue, abort_queue, fig, num_scans))
         experiment_thread.start()
 
         # Function to check for updates from the queue
@@ -554,7 +608,6 @@ def launch_experiment(experiment_data_queue):
                 button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
 
         # Start checking for updates
-        #check_for_updates(output_queue, listbox, initialization_thread, waiting_window, label)
         check_for_updates()
         
 
@@ -570,6 +623,7 @@ def estimate_experiment_timespan():
 
     Legs_entries = entries["trip_legs"]
     time_constant = float(entries["time_constant"].get())
+    num_scans = int(entries["num_scans"].get())
 
     estimated_duration = 0
 
@@ -587,13 +641,13 @@ def estimate_experiment_timespan():
             end_position = screen_values["end [ps]"]
             step_size = screen_values["step [ps]"]
 
-            #time_constant = 1
             settling_time = 5 * time_constant
             average_step_duration_sec = 0.5 + settling_time
             num_steps = ceil( (end_position - start_position) / step_size )
 
             estimated_duration += int(average_step_duration_sec * num_steps )
-        
+            estimated_duration = num_scans * estimated_duration
+
         if not valid_parameters:
             return
 
@@ -639,6 +693,8 @@ def create_experiment_gui_from_dict(parameters_dict):
     time_constant = parameters_dict["time_constant"]
     time_zero = parameters_dict["time_zero"]
     trip_legs = parameters_dict["trip_legs"]
+    num_scans = parameters_dict["num_scans"]
+     
 
     experiment_parameters_frame = Screens["Experiment screen"]["Child frame"]
 
@@ -685,6 +741,15 @@ def create_experiment_gui_from_dict(parameters_dict):
     entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
     entry.insert(0, time_zero)
     entries["time_zero"] = entry
+    row_num += 1
+
+    # Number of scans input
+    label = tk.Label(experiment_parameters_frame, text="Number of scans", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    entry = tk.Entry(experiment_parameters_frame)
+    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+    entry.insert(0, num_scans)
+    entries["num_scans"] = entry
     row_num += 1
 
     # We now create the scrollable area holding the leg parameters
@@ -774,7 +839,8 @@ def edit_trip_legs():
     # but we should still preserve parameters that the user might care for
     time_constant = float(entries["time_constant"].get())
     time_zero = float(entries["time_zero"].get())
-    new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": str(time_constant), "time_zero": str(time_zero)}
+    num_scans = int(entries["num_scans"].get())
+    new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": str(time_constant), "time_zero": str(time_zero), "num_scans": str(num_scans)}
     
     # We now append as many trip legs as requested
     new_legs = {}
