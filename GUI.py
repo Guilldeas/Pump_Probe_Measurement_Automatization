@@ -14,6 +14,7 @@ from tkinter import simpledialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.pyplot as plt
 import os
+import datetime
 
 
 # TO DO list revised by Ankit: (Deadline: 31st of March)
@@ -34,7 +35,6 @@ import os
 #
 # User Notes:
 #   · Changing Windows font can hide some widgets! This GUI was designed for default windows screen parameters
-#   · Launching an experiment with the same name as a previous experiment will overwrite it
  
 
 
@@ -682,6 +682,8 @@ def estimate_experiment_timespan():
         valid_parameters, screen_values = get_parse_validate_screen_params(leg_entries)
 
         if valid_parameters:
+            
+            ### Calculate time speint on each step 
 
             # Get the relevant parameters
             start_position = screen_values["start [ps]"]
@@ -689,46 +691,65 @@ def estimate_experiment_timespan():
             step_size = screen_values["step [ps]"]
 
             settling_time = 5 * time_constant
-            average_step_duration_sec = 0.5 + settling_time
-            num_steps = ceil( (end_position - start_position) / step_size )
+            average_step_duration_sec = 2.2 + settling_time # Moving + settling time
+            average_step_duration_sec += 1.1 # Capturing data
+            
+            # PLACEHOLDER: Add time for optional steps 
+            autoscaling = True
+            if autoscaling:
+                average_step_duration_sec += 1.2
 
+            autoranging = True
+            if autoranging:
+                average_step_duration_sec += 0.1
+            
+            estimating_error = True
+            if estimating_error:
+                average_step_duration_sec += 2.2
+
+            ### Accumulate for all steps on each leg                
+            num_steps = ceil( (end_position - start_position) / step_size )
             estimated_duration += int(average_step_duration_sec * num_steps )
-            estimated_duration = num_scans * estimated_duration
 
         if not valid_parameters:
             return
 
+    # Finally multiply times the amount of scans selected
+    estimated_duration = estimated_duration * num_scans
 
     # At the end of the estimation we create a message for the user
     estimation_message = ""
 
+    # It would also be useful for the user to know when the experiment will end so that they can 
+    # set a timer and leave the lab. For this we estimate the datetime at the end of estimated_duration
+    time_now = datetime.datetime.now()
+    finishing_time = time_now + datetime.timedelta(0,estimated_duration)
+
     # When estimated duration is below 1 min we give an estimation in seconds
     # to make it more readable
     if estimated_duration < 60:
-        estimation_message = str(estimated_duration) + " seconds"
+        estimation_message = str(estimated_duration) + " seconds\nFinishing at around " + str(finishing_time.strftime("%H:%M:%S"))
 
     # Readability for experiments below an hour
     elif estimated_duration < 60*60:
         estimated_duration_mins = int(estimated_duration / 60)
         estimated_duration_secs = int(estimated_duration % 60)
 
-        estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds"
+        estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds\nFinishing at around " + str(finishing_time.strftime("%H:%M:%S"))
 
     # Experiments below a day
     elif estimated_duration < 60*60*24:
         estimated_duration_hours = int(estimated_duration / (60*60))
         estimated_duration_mins = int((estimated_duration % (60*60))/60)
 
-        estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes"
+        estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes\nFinishing at around " + str(finishing_time.strftime("%H:%M"))
     
     # Experiments above
     elif estimated_duration >= 60*60*24:
         estimated_duration_days = int(estimated_duration / (60*60*24))
 
-        estimation_message = f"above {estimated_duration_days} days... Don't you think you are pushing it just a little?"
-    
-    
-    
+        estimation_message = f"above {estimated_duration_days} days\nFinishing the " + str(finishing_time.strftime("%d/%m/%Y, %H")) + "h\nDon't you think you are pushing it just a little?..."
+       
 
     messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
 
@@ -919,6 +940,15 @@ global main_window
 main_window = tk.Tk()
 main_window.title("Automatic Pump Probe")
 main_window.geometry("1200x550")
+
+# Easter egg
+day_of_the_week = datetime.datetime.today().weekday()
+if day_of_the_week == 5 or day_of_the_week == 6:
+    response = messagebox.askokcancel("What a dedicated employee", "I get you, science is cool, but you are at the lab on a weekend.\nPerhaps you should close up for today and get some rest\nWhat do you think?")
+    
+    if response:
+        close_window(main_window)
+
 
 # There are different screens (frames) in this GUI, each serves a different function 
 # and must display different frames to change between them we must store them into a
