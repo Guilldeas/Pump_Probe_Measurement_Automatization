@@ -18,7 +18,6 @@ import os
 
 # TO DO list revised by Ankit: (Deadline: 31st of March)
 #   · Read from buffer instead to avoid saturation
-#   · Allow user to zoom into the graph while the experiment takes place
 #   · Errors should not fail silently (at least throw an error window)
 #
 # Less important TO DO list: No order in particular
@@ -47,6 +46,10 @@ import os
 initialized = False
 entries = {}
 previous_scans = []
+line_object = None
+lines_list = []
+prev_scan = 0
+cmap = plt.get_cmap('inferno')
 
 # Create a queue object to send data from experiment thread back 
 experiment_data_queue = Queue()
@@ -146,7 +149,7 @@ def initialization_thread_logic():
 
 
 
-def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue, fig, num_scans):
+def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue, fig, num_scans, monitoring_window):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
@@ -160,6 +163,7 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue,
             # User has chosen to abort experiment and thus we receive an error code instead
             if isinstance(result, int):
                 restore_output()
+                close_window(monitoring_window)
                 return None
 
             # The scan completed and we store it to compare against the new scan
@@ -455,7 +459,7 @@ def launch_experiment(experiment_data_queue):
         ### Create a window to monitor experiment
         monitoring_window = Toplevel(main_window)
         monitoring_window.title("Experiment in progress")
-        monitoring_window.geometry("1200x800")
+        monitoring_window.geometry("2000x800")
         monitoring_window.resizable(True, True)
         monitoring_window.grab_set()  # Make it modal (blocks interaction with other windows)
 
@@ -492,6 +496,15 @@ def launch_experiment(experiment_data_queue):
         axes.set_xlabel('t [ps]')
         axes.set_ylabel('PD [Vrms]')
 
+        # Create an empty graph to grab a reference to the line object, this is the curve on the graph
+        # and we'll update it for every new data point, we do this because updating preserves user 
+        # zoom and pan on the graph. Simply redrawing the whole graph would reset them
+        global line_object, lines_list, cmap
+        line_object, = axes.plot([], [], linestyle='-', color=cmap(0), label="scan 0")
+        lines_list.append(line_object)
+        axes.set_xlabel('t [ps]')
+        axes.set_ylabel('PD [Vrms]')
+
         # Frame for Graph
         graph_frame = tk.Frame(monitoring_window)
         graph_frame.grid(padx=20, pady=20, row=0, column=2, sticky="ew")
@@ -510,9 +523,6 @@ def launch_experiment(experiment_data_queue):
         toolbar.update()
         toolbar.pack(side=tk.BOTTOM, fill=tk.X)
 
-        #toolbar = NavigationToolbar2Tk(canvas, graph_frame)
-        #toolbar.update()
-        #toolbar.grid(row=1, column=0, sticky="ew")
 
 
         ### Create a button to abort experiment by changing the following flag
@@ -535,14 +545,17 @@ def launch_experiment(experiment_data_queue):
         # Run experiment on a different thread
         num_scans = int(entries["num_scans"].get())
         experiment_thread = threading.Thread(target=experiment_thread_logic, 
-                                                args=(experiment_parameters, experiment_data_queue, abort_queue, fig, num_scans))
+                                                args=(experiment_parameters, experiment_data_queue, abort_queue, fig, num_scans, monitoring_window))
         experiment_thread.start()
 
-        # Function to check for updates from the queue
-        def check_for_updates():
+        global prev_scan
+        prev_scan = 0
 
-            global previous_scans
-            
+        # Function to check for updates from the queue
+        def monitor_experiment():
+
+            global line_object, lines_list, prev_scan, cmap
+
             while not output_queue.empty():
                 new_message = output_queue.get()
                 listbox.insert(tk.END, new_message)
@@ -554,20 +567,47 @@ def launch_experiment(experiment_data_queue):
                 # Only update graph whenever new data is acquired
                 if not experiment_data_queue.empty():
 
-                    # Get data from thread
+                    # Get data from experiment thread
                     data_packet = experiment_data_queue.get()
                     positions = data_packet["Positions"]
                     photodiode_data = data_packet["Photodiode data"]
                     photodiode_data_errors = data_packet["Photodiode data errors"]
+                    scan_number = int(data_packet["Scan number"])
+
+                    # If we detect that arriving data corresponds to a new scan we
+                    # create a new line object to draw on a different curve
+                    if scan_number > prev_scan:
+
+                        # We first compute the color for the line 
+                        max_scans = experiment_parameters["num_scans"]
+                        color_fraction = scan_number / max_scans
+                        new_color = cmap(color_fraction)
+
+                        # We then generate a new line object and append it to the list
+                        new_line_object, = axes.plot([], [], linestyle='-',color=new_color, label=f"scan {scan_number}")
+                        lines_list.append(new_line_object)
+                        line_object = new_line_object
+                        prev_scan = scan_number
+
+
+                    # We update only the last line, corresponding to current scan data
+                    # that way we keep the curves for the previous scans untouched
+                    line_to_update = lines_list[-1]
+
+                    # Update graph with new data
+                    line_to_update.set_xdata(positions[:len(photodiode_data)])
+                    line_to_update.set_ydata(photodiode_data)
 
                     # Clear and re-plot
+                    '''
                     axes.clear()
                     axes.set_xlabel('t [ps]')
                     axes.set_ylabel('PD [Vrms]')
                     axes.plot(positions[:len(photodiode_data)], photodiode_data, linestyle='-', color="black", label="current scan")
                     axes.errorbar(positions[:len(photodiode_data)], photodiode_data, yerr=photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
-
+                    '''
                     # Graph data for previous scans aswell
+                    ''' EDIT OUT THE REDRAWING OF PREVIOUS DATA
                     for prev_scan in previous_scans:
 
                         # I know this is ugly af, I just pray to God that you don't actually have to 
@@ -581,19 +621,26 @@ def launch_experiment(experiment_data_queue):
                         axes.plot(prev_positions, prev_photodiode_data, linestyle='-', label=str("scan number" + str(scan_number)))
                         axes.errorbar(prev_positions, prev_photodiode_data, yerr=prev_photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
 
+                    '''
 
+                    '''
                     # Fix X-Axis and adjust Y-axis dynamically with some extra space
                     axes.set_xlim(min(positions) - 0.15*abs(min(positions)), max(positions) + 0.15*abs(max(positions)))
                     if len(photodiode_data) > 1:
                         axes.set_ylim(0.5*min(photodiode_data), 1.5*max(photodiode_data))
 
                     plt.legend(loc="upper left")
+                    '''
 
-                    # Redraw Canvas
+                    axes.relim()           # Recompute the data limits based on current data
+                    axes.autoscale_view()  # Auto-adjust the view to the new limits
+                    axes.legend()
+
+                    # Update Canvas
                     canvas.draw()
 
-                # Check every 100ms for new data
-                monitoring_window.after(100, check_for_updates)
+                # Update the monitoring window at 100ms intervals
+                monitoring_window.after(100, monitor_experiment)
 
             # Close experiment thread after it's done
             else:
@@ -607,8 +654,8 @@ def launch_experiment(experiment_data_queue):
                 button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
                 button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
 
-        # Start checking for updates
-        check_for_updates()
+        # Start checking monitoring the experiment
+        monitor_experiment()
         
 
     except Exception as e:

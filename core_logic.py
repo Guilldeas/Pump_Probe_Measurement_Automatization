@@ -452,11 +452,14 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
         # we'll pass references to the local lists "Photodiode_data" and the GUI will
         # be able to access them and attempt to draw from them, this leads to an error
         # where the error bar has not been calculated but the photodiode data has been
-        # acquired leading to an incorrect size error when plotting 
+        # acquired leading to an incorrect size error when plotting.
+        # Passing the scan number will allow perform_experiment() to signal monitor_experiment()
+        # That a new curve needs to be drawn
         data_packet = {
                         "Photodiode data": Photodiode_data.copy(), 
                         "Photodiode data errors": Photodiode_data_errors.copy(),
-                        "Positions": Positions_relative.copy()
+                        "Positions": Positions_relative.copy(),
+                        "Scan number": scan
                       }
         experiment_data_queue.put(data_packet)
 
