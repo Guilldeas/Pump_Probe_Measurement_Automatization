@@ -17,15 +17,15 @@ import os
 import datetime
 
 
-# TO DO list revised by Cris and Ankit: (Deadline: 1sr of April)
+# TO DO list revised by Cris and Ankit: (Deadline: 1st of April)
 #
-#   · Errors should not fail silently                                          [V]          
-#       - Try loop to all GUI                                                      [V]                                              
+#   · Errors should not fail silently                                          [V]
+#       - Try loop to all GUI                                                      [V]
 #       - Solve error propagations on nested try blocks:                           [V]
 #       - Solve error propagations on thread:                                      [V]
 #
 #   · The label for the data should be changed accordingly to what we were
-#     measuring (V or I) both in graph and excel. Or a note to chenge that     [ ]
+#     measuring (V or I) both in graph and excel. Or a note to change that     [V]
 # 
 #   · Absolute values label on experiment screen and relative time on excel
 #      header                                                                  [ ]
@@ -206,7 +206,7 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue,
 
             # Perform experiment and get data at the end
             abort_queue.put(False)  # before we start the experiment we reset the abort flag to false
-            result = core_logic.perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan)
+            result = core_logic.perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan, num_scans)
 
             # User has chosen to abort experiment and thus we receive an error code instead
             if isinstance(result, int):

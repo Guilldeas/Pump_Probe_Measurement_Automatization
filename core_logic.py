@@ -44,10 +44,10 @@ def request_settling_time(time_constant, filter_slope, verbose=False):
 
     settling_time_seconds = time_constant * settling_time_tau_multiples[str(filter_slope)]
 
-    # Inform the user
+    # Inform the user, use fomratting to write only 2 significant digits
     if verbose:
-        print(f"Lockin has been configured to time constant {round(time_constant, 2)}s and filter roll-off {filter_slope}dB/oct")
-        print(f"This calls for a settling time of {round(settling_time_seconds, 2)}s to settle to 99.9% after a step response")
+        print(f"Lockin has been configured to time constant {float('%2g'%time_constant)}s and filter roll-off {filter_slope}dB/oct")
+        print(f"This calls for a settling time of {float('%2g'%settling_time_seconds)}s to settle to 99.9% after a step response")
 
     return settling_time_seconds
 
@@ -311,12 +311,12 @@ def initialization(Troubleshooting):
 
     
     
-def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan):
+def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan, num_scans):
 
     global adapter
 
     print("------------------------------------------")
-    print(f"Scan number {scan}")
+    print(f"Scan number {scan}/{num_scans}")
 
     # The input dict contains information for each leg of the trip
     time_constant = parameters_dict["time_constant"]
@@ -530,12 +530,22 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
 
     print(f"Writting CSV file")
 
+    # Note the type of measurement that we just took 
+    # to label data accordingly
+    signal_type = clfun.request_signal_type(adapter)
+    signal_type_str = ""
+    if signal_type == 0:
+        signal_type_str = "[Vrms]"
+
+    if signal_type == 1:
+            signal_type_str = "[Arms]"
+
     # Create a DataFrame with headers
     data_df = pd.DataFrame({
         "Time [ps]": Positions_relative,
         "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
-        "Voltage from PD [Vrms]": Photodiode_data,
-        "PD error [Vrms]": Photodiode_data_errors
+        "Signal level " + signal_type_str: Photodiode_data,
+        "Signal error " + signal_type_str: Photodiode_data_errors
     })
 
     # Get current date as a string

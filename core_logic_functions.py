@@ -698,6 +698,25 @@ def request_R_noise(adapter):
 
 
 
+# --- Request input signal type ---
+def request_signal_type(adapter):
+    """
+    Requests signal type (voltage or current) to lockin.
+    Returns 0 for voltage and 1 for current.
+    """
+
+    try:
+        command = "IVMD?\n"
+        adapter.write(command)
+        time.sleep(0.1)  # Small delay for processing
+        response = adapter.read()
+        return int(response.strip()) 
+    
+    except Exception as e:
+        raise Exception(f"Error requesting singal type: {e}")
+        return None
+
+
 def find_next_sensitivity(adapter):
     """
     Finds and returns the sensitivity value that is right above the current input range.
