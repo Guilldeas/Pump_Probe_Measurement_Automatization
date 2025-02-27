@@ -22,7 +22,7 @@ def get_device_list_by_type(lib, device_type=0):
     result = lib.TLI_GetDeviceListByTypeExt(receiveBuffer, buffer_size, device_type)
     if result != 0:
         print(f"    · Unable to connect to Delay Stage")
-        raise Exception(f"    · TLI_GetDeviceListByTypeExt failed with error code: {result}")
+        raise Exception(f"TLI_GetDeviceListByTypeExt failed with error code: {result}")
     elif Troubleshooting:
             print(f"    · TLI_GetDeviceListByTypeExt passed without raising errors")
 
@@ -140,7 +140,7 @@ def move_to_position(lib, serial_num, channel, delay_ps):
                                                 c_int(0)) # Pass int 0 on last input to choose distance units
 
     if result != 0:
-        raise Exception(f"    · BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
+        raise Exception(f"BMC_GetDeviceUnitFromRealValue failed: {get_error_description(result)}")
     elif Troubleshooting:
             print(f"    · BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
@@ -151,7 +151,7 @@ def move_to_position(lib, serial_num, channel, delay_ps):
     # Clear messaging que so that we can listen to the device for it's "finished moving" message
     result = lib.BMC_ClearMessageQueue(serial_num, channel)
     if result != 0:
-        raise Exception(f"    · BMC_ClearMessageQueue failed: {get_error_description(result)}")
+        raise Exception(f"BMC_ClearMessageQueue failed: {get_error_description(result)}")
     elif Troubleshooting:
         print(f"    · BMC_ClearMessageQueue passed without raising errors")
 
@@ -161,7 +161,7 @@ def move_to_position(lib, serial_num, channel, delay_ps):
     time.sleep(1)
     result = lib.BMC_MoveToPosition(serial_num, channel, new_pos_dev)
     if result != 0:
-        raise Exception(f"    · BMC_MoveToPosition failed: {get_error_description(result)}")
+        raise Exception(f"BMC_MoveToPosition failed: {get_error_description(result)}")
     elif Troubleshooting:
         print(f"    · BMC_MoveToPosition passed without raising errors")    
     time.sleep(1)
@@ -189,7 +189,7 @@ def move_to_position(lib, serial_num, channel, delay_ps):
     # (both polling and this funciton will suppousedly prompt the device to evaluate it)
     result = lib.BMC_RequestPosition(serial_num, channel)
     if result != 0:
-        raise Exception(f"    · BMC_RequestPosition failed: {get_error_description(result)}")
+        raise Exception(f"BMC_RequestPosition failed: {get_error_description(result)}")
     elif Troubleshooting:
         print(f"    · BMC_RequestPosition passed without raising errors")
     time.sleep(0.2)
@@ -256,7 +256,7 @@ def initialize_connection(port="COM5", baudrate=115200, timeout=1):
         print(f"    ·RS232 communication initialized successfully")
         return adapter
     except Exception as e:
-        print(f"    ·Error initializing connection: {e}")
+        raise Exception(f"Error initializing connection: {e}")
         return None
 
 
@@ -301,7 +301,7 @@ def set_sensitivity(adapter, sensitivity):
         time.sleep(0.1)  # Small delay to ensure the instrument processes the command
         print(f"    ·Sensitivity set to {sensitivity} V (Index {index}).")
     except Exception as e:
-        print(f"Error setting sensitivity: {e}")
+        raise Exception(f"Error setting sensitivity: {e}")
 
 
 #------ Configure lockin time constant ------
@@ -343,7 +343,45 @@ def set_time_constant(adapter, time_constant):
         time.sleep(0.1)  # Small delay to ensure the instrument processes the command
         print(f"    ·Time constant set to {time_constant} s (Index {index}).")
     except Exception as e:
-        print(f"Error setting time constant: {e}")
+        raise Exception(f"Error setting time constant: {e}")
+
+
+
+#------ Configure lockin filter slope ------
+def set_filter_slope(adapter, roll_off):
+    """
+    Sets the SR860 filter roll off to the specified value.
+    
+    Parameters:
+        adapter: PyMeasure SerialAdapter object for communication.
+        roll off: float - Desired roll off value in dB/oct
+    
+    Raises:
+        ValueError: If the provided roll off is not in the predefined list.
+    """
+    # Time constant levels mapped to their indices (from the SR860 manual)
+    filter_slope_table = {0:6, 1:12, 2:18, 3:24} # In dB/Oct
+
+    # Find the index for the given filter slope
+    index = None
+    for key, value in filter_slope_table.items():
+        if abs(value - roll_off) < 1e-12:  # Compare with tolerance for floats
+            index = key
+            break
+
+    # If time constant not found, raise an error
+    if index is None:
+        raise ValueError(f"Error: Invalid filter slope: {roll_off} dB/oct. "
+                         f"Valid filter slopes are: {list(filter_slope_table.values())}")
+
+    # Send the OFSL command with the selected index
+    try:
+        command = f"OFSL {index}\n"
+        adapter.write(command)
+        time.sleep(0.1)  # Small delay to ensure the instrument processes the command
+        print(f"    · Filter slope set to {roll_off} dB/oct.")
+    except Exception as e:
+        raise Exception(f"Error setting filter slope: {e}")
 
 
 
@@ -452,7 +490,7 @@ def configure_lockin(adapter):
 
         
     except Exception as e:
-        print(f"Error configuring lock-in amplifier: {e}")
+        raise Exception(f"Error configuring lock-in amplifier: {e}")
 
 
 
@@ -476,7 +514,7 @@ def request_signal_strength(adapter):
         return int(response.strip()) # between 0 (lowest) and 4 (overload)
     
     except Exception as e:
-        print(f"Error requesting R: {e}")
+        raise Exception(f"Error requesting R: {e}")
         return None
 
 
@@ -516,7 +554,7 @@ def request_range(adapter):
             return f"Error: Unexpected range index received: {range_index}"
 
     except Exception as e:
-        print(f"Error requesting voltage range: {e}")
+        raise Exception(f"Error requesting voltage range: {e}")
         return None
 
 
@@ -534,7 +572,7 @@ def request_R(adapter):
         return float(response.strip()) # in Vrms
     
     except Exception as e:
-        print(f"Error requesting R: {e}")
+        raise Exception(f"Error requesting R: {e}")
         return None
 
 
@@ -559,7 +597,7 @@ def autorange(adapter):
         '''
 
     except Exception as e:
-        print(f"Error sending AutoRange command: {e}")
+        raise Exception(f"Error sending AutoRange command: {e}")
 
 
 # --- Request AutoScale ---
@@ -580,7 +618,7 @@ def autoscale(adapter):
 
 
     except Exception as e:
-        print(f"Error sending AutoScale command: {e}")
+        raise Exception(f"Error sending AutoScale command: {e}")
 
 
 
@@ -602,7 +640,7 @@ def request_time_constant(adapter):
         return time_constants[time_constant_index]
     
     except Exception as e:
-        print(f"Error requesting time constant: {e}")
+        raise Exception(f"Error requesting time constant: {e}")
         return None
 
 
@@ -623,7 +661,7 @@ def request_filter_slope(adapter):
         return filter_slopes[filter_slope_index]
     
     except Exception as e:
-        print(f"Error requesting filter slope: {e}")
+        raise Exception(f"Error requesting filter slope: {e}")
         return None
 
 
@@ -655,7 +693,7 @@ def request_R_noise(adapter):
         return R_noise
     
     except Exception as e:
-        print(f"Error requesting R: {e}")
+        raise Exception(f"Error requesting R: {e}")
         return None
 
 
@@ -730,7 +768,7 @@ def find_next_sensitivity(adapter):
             return max(range_voltage_map.values())
 
     except Exception as e:
-        print(f"Error finding next sensitivity: {e}")
+        raise Exception(f"Error finding next sensitivity: {e}")
         return None
 
 

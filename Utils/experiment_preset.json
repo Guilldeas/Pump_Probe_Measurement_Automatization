@@ -1,1 +1,1 @@
-{"experiment_name": "new_experiment", "time_constant": "0.0001", "time_zero": 1000.0, "num_scans": 2, "trip_legs": {"0": {"start [ps]": 0.0, "end [ps]": 1000.0, "step [ps]": 100.0}}}
+{"experiment_name": "szfhh", "time_constant": 1e-06, "roll_off": 6, "time_zero": 500.0, "num_scans": 1, "trip_legs": {"0": {"start [ps]": 0.0, "end [ps]": 1000.0, "step [ps]": 250.0}}}

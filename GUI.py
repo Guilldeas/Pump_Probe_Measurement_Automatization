@@ -7,7 +7,7 @@ import core_logic
 import core_logic_functions as clfun
 import threading
 import sys
-from queue import Queue
+import queue
 from functools import partial
 from math import ceil
 from tkinter import simpledialog
@@ -17,9 +17,42 @@ import os
 import datetime
 
 
-# TO DO list revised by Ankit: (Deadline: 31st of March)
-#   · Read from buffer instead to avoid saturation
-#   · Errors should not fail silently (at least throw an error window)
+# TO DO list revised by Cris and Ankit: (Deadline: 1sr of April)
+#
+#   · Errors should not fail silently                                          [V]          
+#       - Try loop to all GUI                                                      [V]                                              
+#       - Solve error propagations on nested try blocks:                           [V]
+#       - Solve error propagations on thread:                                      [V]
+#
+#   · The label for the data should be changed accordingly to what we were
+#     measuring (V or I) both in graph and excel. Or a note to chenge that     [ ]
+# 
+#   · Absolute values label on experiment screen and relative time on excel
+#      header                                                                  [ ]
+#
+#    · Change from length of step to number of steps in leg and give length 
+#     on screen (or don't, they can ignore the last point when performing FFT) [ ]
+#
+#   · Build some documentation                                                 [ ]
+#       - Give little tutorial on how to change lockin parameters at
+#         nitialization                                                            [ ]
+#
+#   · Average all scans while (or at the end) experiment are taking place      [ ]
+#
+#    · Checkbox for error estimation                                           [ ]
+#
+#    · Safely close at the end, something gets hung up                         [ ]
+#
+#    · Read from buffer instead to avoid saturation                            [ ]
+#       - Calculate settling time with both filter settling and filter drop-off    [V]
+#       - Grab buffer size but only the data points gathered after settling        [ ]
+#           * RS-232 does not support grabing the whole buffer at once (CAPTUREGET) and grabbing it 
+#             value after value is prohibitely slow, changing interfaces to GPIB could
+#             be a solution...
+#             
+#       - Check for saturation in the buffer                                       [ ]
+#       - Make sure to grab only buffer lens that do not overlap with next points  [ ]
+#       - Average the buffer to a single value and store as single data point      [ ]
 #
 # Less important TO DO list: No order in particular
 #   · Choose settling precission or at least verify
@@ -35,6 +68,8 @@ import datetime
 #
 # User Notes:
 #   · Changing Windows font can hide some widgets! This GUI was designed for default windows screen parameters
+#   · Careful using NI-Visa on the computer this software runs on, I had to delete it bc it was causing problems but 
+#     it oculd've been because part of my installation was manually deleted... still
  
 
 
@@ -49,11 +84,22 @@ previous_scans = []
 line_object = None
 lines_list = []
 prev_scan = 0
+
+# These variables are initialized as None so that we can check if they have 
+# been intialized later on and perform some action (plt.close, join etc) that
+# way we don't risk trying to close a non initialized variable 
+adapter = None
+fig = None
+initialization_thread = None
+experiment_thread = None
+
 cmap = plt.get_cmap('inferno')
 
-# Create a queue object to send data from experiment thread back 
-experiment_data_queue = Queue()
-abort_queue = Queue()
+# Queue object to send data from experiment thread back 
+experiment_data_queue = queue.Queue()    # Sends data from experiment thread to be graphed at GUI
+abort_queue = queue.Queue()              # Sends abort signal from GUI to experiment thread to end func safely
+error_queue = queue.Queue()              # Sends Exceptions caught in experiment and initialization threads 
+                                   # to be displayed on GUI 
 
 def show_screen_from_menu(screen_name):
     """ Wrapper function to use `show_screen` inside OptionMenu """
@@ -106,8 +152,8 @@ def close_window(window):
 
 # Function to redirect stdout and stderr to a Queue
 class OutputRedirector:
-    def __init__(self, queue):
-        self.queue = queue
+    def __init__(self, queue_obj):
+        self.queue = queue_obj
 
     def write(self, message):
         if message.strip():  # Avoid empty lines
@@ -117,13 +163,12 @@ class OutputRedirector:
         pass  # Required for compatibility
 
 
-
-def capture_output(queue):
+def capture_output(queue_obj):
     """
     Redirect both stdout and stderr to the provided Queue.
     """
-    sys.stdout = OutputRedirector(queue)
-    sys.stderr = OutputRedirector(queue)  # Capture exceptions
+    sys.stdout = OutputRedirector(queue_obj)
+    sys.stderr = OutputRedirector(queue_obj)
 
 
 
@@ -142,8 +187,11 @@ def initialization_thread_logic():
     try:
         core_logic.initialization(Troubleshooting=False)
         #core_logic.initialization_dummy(Troubleshooting=False)
+
+    # Exceptions dont propagate upwards when using threads, we have to send it to main code through a Queue
     except Exception as e:
-        print(f"Error: {e}")  # Will be captured and displayed in GUI
+        error_queue.put(Exception(f"An error occured when initializing in function core_logic.initialization():\n{e}"))
+
     finally:
         restore_output()
 
@@ -180,8 +228,10 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue,
 
             #core_logic.perform_experiment_dummy(Troubleshooting=False)
 
+    # Exceptions dont propagate upwards when using threads, we have to send it to main code through a Queue
     except Exception as e:
-        print(f"Error: {e}")  # Will be captured and displayed in GUI
+        error_queue.put(Exception(f"An error occured during the experiment:\n{e}"))
+    
     finally:
         restore_output()
         
@@ -216,7 +266,7 @@ def initialize_button():
     label.grid(row=1, column=0, padx=20, pady=20, sticky="n")
 
     # Queue for communication between threads
-    output_queue = Queue()
+    output_queue = queue.Queue()
 
     # Redirect stdout and stderr to the queue
     capture_output(output_queue)
@@ -337,9 +387,13 @@ def get_parse_validate_screen_params(entries_widgets):
         screen_values[parameter_name] = entries_widgets[parameter_name].get()
 
     # Construct dict holding validation rules for each value
-    with open('Utils\experiment_preset_validation_rules.json', "r") as json_file:
-        validation_rules = json.load(json_file)
+    validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+    try:
+        with open(validation_rules_file_path, "r") as json_file:
+            validation_rules = json.load(json_file)
     
+    except Exception as e:
+        raise Exception(f"An error occured when opening {validation_rules_file_path}\n{e}")
 
 
     # Check that each parameter verifies all validation rules
@@ -366,96 +420,98 @@ def get_parse_validate_screen_params(entries_widgets):
 
 def save_parameters(experiment_preset):
     
-    trip_legs = experiment_preset["trip_legs"]
+    try:
+        trip_legs = experiment_preset["trip_legs"]
 
-    # We create empty presets to store parameters after validation
-    global entries
-    trip_legs_entries = entries["trip_legs"]
-    experiment_preset_save = {}
-    trip_legs_save = {}
-    #for leg_number, leg_parameters in trip_legs.items():
-    for leg_number, leg_parameters in trip_legs_entries.items():
-        valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters)
-    
-        # If any of the parameters is not valid we return
-        if not valid_parameters:
-            return
+        # We create empty presets to store parameters after validation
+        global entries
+        trip_legs_entries = entries["trip_legs"]
+        experiment_preset_save = {}
+        trip_legs_save = {}
+        #for leg_number, leg_parameters in trip_legs.items():
+        for leg_number, leg_parameters in trip_legs_entries.items():
+            valid_parameters, screen_parameters = get_parse_validate_screen_params(leg_parameters)
         
-        # If the parameters for this particular leg were correct we keep them on a dict
-        trip_legs_save[leg_number] = screen_parameters
-    
-    # Finally we construct a dict to save it by getting the parameters from screen that don't need to save the validated
-    experiment_preset_save["experiment_name"] = entries["experiment_name"].get()
-    experiment_preset_save["time_constant"] = entries["time_constant"].get()
-    experiment_preset_save["time_zero"] = float(entries["time_zero"].get())
-    experiment_preset_save["num_scans"] = int(entries["num_scans"].get())
-    experiment_preset_save["trip_legs"] = trip_legs_save
-    
-    # After all tests have passed we save them into a json
-    with open('Utils\experiment_preset.json', "w") as json_file:
-    
-        json.dump(experiment_preset_save, json_file)
-    
-        messagebox.showinfo("Parameters saved", f"Parameters were succesfully saved")
+            # If any of the parameters is not valid we return
+            if not valid_parameters:
+                return
+            
+            # If the parameters for this particular leg were correct we keep them on a dict
+            trip_legs_save[leg_number] = screen_parameters
+        
+        # Finally we construct a dict to save it by getting the parameters from screen that don't need to save the validated
+        experiment_preset_save["experiment_name"] = entries["experiment_name"].get()
+        experiment_preset_save["time_constant"] = float(entries["time_constant"].get())
+        experiment_preset_save["roll_off"] = int(entries["roll_off"].get())
+        experiment_preset_save["time_zero"] = float(entries["time_zero"].get())
+        experiment_preset_save["num_scans"] = int(entries["num_scans"].get())
+        experiment_preset_save["trip_legs"] = trip_legs_save
+        
+        # After all tests have passed we save them into a json
+        with open('Utils\experiment_preset.json', "w") as json_file:
+        
+            json.dump(experiment_preset_save, json_file)
+        
+            messagebox.showinfo("Parameters saved", f"Parameters were succesfully saved")
+        
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
 
 
 
 def launch_experiment(experiment_data_queue):
 
-    global entries
-
-    if not initialized:
-        messagebox.showinfo("Error launching experiment", "Please start/wait for device initialization to complete before launching experiment")
-        return
-
-    ### First we'll verify parameters are safe before launching the experiment
-    
-    # Extract references to data we wanna validate
-    Legs_entries = entries["trip_legs"]
-
-    # Construct a dict that will store the parsed verified data to later feed to the delay stage
-    experiment_parameters = {
-        "experiment_name": entries["experiment_name"].get(), 
-        "time_constant": float(entries["time_constant"].get()),
-        "time_zero":float(entries["time_zero"].get()),
-        "num_scans":int(entries["num_scans"].get()) 
-        }
-    
-    trip_legs_parsed = {}
-
-    # Validate and parse iteratively
-    for leg_number, leg_entries in Legs_entries.items():
-
-        # For each leg parameters we estimate and accumulate it's duration
-        # First get parameters from screen and verify they are valid
-        valid_parameters, parsed_values = get_parse_validate_screen_params(leg_entries)
-
-        if valid_parameters:
-            trip_legs_parsed[leg_number] = parsed_values
-        
-        else:
-            return
-    
-    experiment_parameters["trip_legs"] = trip_legs_parsed
-
-    # Then we check whether an output folder of the same name is in danger of being overwritten
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    output_folder = os.path.join(current_dir, "Output")
-    data_folder = os.path.join(output_folder, entries["experiment_name"].get())
-
-    if os.path.exists(data_folder):
-
-        response = messagebox.askokcancel("Warning", "Choosing the same experiment file name will overwrite the data for the previous experiment with the same name\nDo you wish to continue?")
-
-        # User clicked "Cancel" and we abort the experiment 
-        if not response:  
-            return 
-            
-
-    ### Once parameters are verified and parsed we proceed with the experiment launch
-
-    # Catch exceptions while performing the experiment 
     try:
+        global entries
+
+        if not initialized:
+            messagebox.showinfo("Error launching experiment", "Please start/wait for device initialization to complete before launching experiment")
+            return
+
+        ### First we'll verify parameters are safe before launching the experiment
+        
+        # Extract references to data we wanna validate
+        Legs_entries = entries["trip_legs"]
+
+        # Construct a dict that will store the parsed verified data to later feed to the delay stage
+        experiment_parameters = {
+            "experiment_name": entries["experiment_name"].get(), 
+            "time_constant": float(entries["time_constant"].get()),
+            "roll_off": int(entries["roll_off"].get()),
+            "time_zero":float(entries["time_zero"].get()),
+            "num_scans":int(entries["num_scans"].get()) 
+            }
+        
+        trip_legs_parsed = {}
+
+        # Validate and parse iteratively
+        for leg_number, leg_entries in Legs_entries.items():
+
+            # For each leg parameters we estimate and accumulate it's duration
+            # First get parameters from screen and verify they are valid
+            valid_parameters, parsed_values = get_parse_validate_screen_params(leg_entries)
+
+            if valid_parameters:
+                trip_legs_parsed[leg_number] = parsed_values
+            
+            else:
+                return
+        
+        experiment_parameters["trip_legs"] = trip_legs_parsed
+
+        # Then we check whether an output folder of the same name is in danger of being overwritten
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        output_folder = os.path.join(current_dir, "Output")
+        data_folder = os.path.join(output_folder, entries["experiment_name"].get())
+
+        if os.path.exists(data_folder):
+
+            messagebox.showerror("Error", "Choosing the same experiment file name will overwrite the data for the previous experiment with the same name\nPlease change experiment file name")
+            return 
+                
+
+        ### Once parameters are verified and parsed we proceed with the experiment launch
+
         ### Create a window to monitor experiment
         monitoring_window = Toplevel(main_window)
         monitoring_window.title("Experiment in progress")
@@ -528,16 +584,19 @@ def launch_experiment(experiment_data_queue):
         ### Create a button to abort experiment by changing the following flag
         # Launch experiment will check this global flag at each loop
         def abort_experiment():
-            messagebox.showinfo("Wait", f"Aborting experiment\nPlease wait while experiment closes safely")
+            messagebox.showinfo("Wait", f"Stopping experiment\nPlease wait while experiment closes safely")
             abort_queue.put(True)
 
-        button = tk.Button(monitoring_window, text="Abort experiment", command=abort_experiment)
+            # Close figure
+            plt.close(fig)
+
+        button = tk.Button(monitoring_window, text="Stop experiment", command=abort_experiment)
         button.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
 
 
         # Queue for reading prints from core_logic functions and displaying them on listbox
-        output_queue = Queue()
+        output_queue = queue.Queue()
 
         # Redirect stdout and stderr to the queue
         capture_output(output_queue)
@@ -598,40 +657,6 @@ def launch_experiment(experiment_data_queue):
                     line_to_update.set_xdata(positions[:len(photodiode_data)])
                     line_to_update.set_ydata(photodiode_data)
 
-                    # Clear and re-plot
-                    '''
-                    axes.clear()
-                    axes.set_xlabel('t [ps]')
-                    axes.set_ylabel('PD [Vrms]')
-                    axes.plot(positions[:len(photodiode_data)], photodiode_data, linestyle='-', color="black", label="current scan")
-                    axes.errorbar(positions[:len(photodiode_data)], photodiode_data, yerr=photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
-                    '''
-                    # Graph data for previous scans aswell
-                    ''' EDIT OUT THE REDRAWING OF PREVIOUS DATA
-                    for prev_scan in previous_scans:
-
-                        # I know this is ugly af, I just pray to God that you don't actually have to 
-                        # troubleshoot the code I wrote today :/ 
-                        prev_positions = list(prev_scan["Time [ps]"].values())
-                        prev_photodiode_data = list(prev_scan["Voltage from PD [Vrms]"].values())
-                        prev_photodiode_data_errors = list(prev_scan["PD error [Vrms]"].values())
-                        prev_photodiode_data_errors = list(prev_scan["PD error [Vrms]"].values())
-                        scan_number = prev_scan["Scan number"]
-
-                        axes.plot(prev_positions, prev_photodiode_data, linestyle='-', label=str("scan number" + str(scan_number)))
-                        axes.errorbar(prev_positions, prev_photodiode_data, yerr=prev_photodiode_data_errors, ecolor="black", fmt='o', linewidth=1, capsize=1)
-
-                    '''
-
-                    '''
-                    # Fix X-Axis and adjust Y-axis dynamically with some extra space
-                    axes.set_xlim(min(positions) - 0.15*abs(min(positions)), max(positions) + 0.15*abs(max(positions)))
-                    if len(photodiode_data) > 1:
-                        axes.set_ylim(0.5*min(photodiode_data), 1.5*max(photodiode_data))
-
-                    plt.legend(loc="upper left")
-                    '''
-
                     axes.relim()           # Recompute the data limits based on current data
                     axes.autoscale_view()  # Auto-adjust the view to the new limits
                     axes.legend()
@@ -654,111 +679,119 @@ def launch_experiment(experiment_data_queue):
                 button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
                 button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
 
+                # Close figure
+                plt.close(fig)
+
         # Start checking monitoring the experiment
         monitor_experiment()
         
 
     except Exception as e:
-        print(f"Error: {e}")  # Will be captured and displayed in GUI
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
+        plt.close(fig)
 
 
 
 
 def estimate_experiment_timespan():
 
-    global entries
+    try:        
+        global entries, adapter
 
-    Legs_entries = entries["trip_legs"]
-    time_constant = float(entries["time_constant"].get())
-    num_scans = int(entries["num_scans"].get())
+        # Grab parameters defining experiment length
+        Legs_entries = entries["trip_legs"]
+        time_constant = float(entries["time_constant"].get())
+        roll_off = int(entries["roll_off"].get())
+        num_scans = int(entries["num_scans"].get())
+        settling_time = core_logic.request_settling_time(time_constant, filter_slope=roll_off, verbose=False)
+        estimated_duration = 0
 
-    estimated_duration = 0
+        # Iterate through dict containing all trip legs
+        for leg_entries in Legs_entries.values():
 
-    # Iterate through dict containing all trip legs
-    for leg_entries in Legs_entries.values():
+            # For each leg parameters we estimate and accumulate it's duration
+            # First get parameters from screen and verify they are valid
+            valid_parameters, screen_values = get_parse_validate_screen_params(leg_entries)
 
-        # For each leg parameters we estimate and accumulate it's duration
-        # First get parameters from screen and verify they are valid
-        valid_parameters, screen_values = get_parse_validate_screen_params(leg_entries)
+            if valid_parameters:
+                
+                ### Calculate time speint on each step 
 
-        if valid_parameters:
-            
-            ### Calculate time speint on each step 
+                # Get the relevant parameters
+                start_position = screen_values["start [ps]"]
+                end_position = screen_values["end [ps]"]
+                step_size = screen_values["step [ps]"]
 
-            # Get the relevant parameters
-            start_position = screen_values["start [ps]"]
-            end_position = screen_values["end [ps]"]
-            step_size = screen_values["step [ps]"]
+                average_step_duration_sec = 2.2 + settling_time # Moving + settling time
+                average_step_duration_sec += 1.1 # Capturing data
+                
+                # PLACEHOLDER: Add time for optional steps 
+                autoscaling = True
+                if autoscaling:
+                    average_step_duration_sec += 1.2
 
-            settling_time = 5 * time_constant
-            average_step_duration_sec = 2.2 + settling_time # Moving + settling time
-            average_step_duration_sec += 1.1 # Capturing data
-            
-            # PLACEHOLDER: Add time for optional steps 
-            autoscaling = True
-            if autoscaling:
-                average_step_duration_sec += 1.2
+                autoranging = True
+                if autoranging:
+                    average_step_duration_sec += 0.1
+                
+                estimating_error = True
+                if estimating_error:
+                    average_step_duration_sec += 2.2
 
-            autoranging = True
-            if autoranging:
-                average_step_duration_sec += 0.1
-            
-            estimating_error = True
-            if estimating_error:
-                average_step_duration_sec += 2.2
+                ### Accumulate for all steps on each leg                
+                num_steps = ceil( (end_position - start_position) / step_size )
+                estimated_duration += int(average_step_duration_sec * num_steps )
 
-            ### Accumulate for all steps on each leg                
-            num_steps = ceil( (end_position - start_position) / step_size )
-            estimated_duration += int(average_step_duration_sec * num_steps )
+            if not valid_parameters:
+                return None
 
-        if not valid_parameters:
-            return
+        # Finally multiply times the amount of scans selected
+        estimated_duration = estimated_duration * num_scans
 
-    # Finally multiply times the amount of scans selected
-    estimated_duration = estimated_duration * num_scans
+        # At the end of the estimation we create a message for the user
+        estimation_message = ""
 
-    # At the end of the estimation we create a message for the user
-    estimation_message = ""
+        # It would also be useful for the user to know when the experiment will end so that they can 
+        # set a timer and leave the lab. For this we estimate the datetime at the end of estimated_duration
+        time_now = datetime.datetime.now()
+        finishing_time = time_now + datetime.timedelta(0, estimated_duration)
 
-    # It would also be useful for the user to know when the experiment will end so that they can 
-    # set a timer and leave the lab. For this we estimate the datetime at the end of estimated_duration
-    time_now = datetime.datetime.now()
-    finishing_time = time_now + datetime.timedelta(0,estimated_duration)
+        # When estimated duration is below 1 min we give an estimation in seconds
+        # to make it more readable
+        if estimated_duration < 60:
+            estimation_message = str(estimated_duration) + " seconds\nFinishing at around " + str(finishing_time.strftime("%H:%M:%S"))
 
-    # When estimated duration is below 1 min we give an estimation in seconds
-    # to make it more readable
-    if estimated_duration < 60:
-        estimation_message = str(estimated_duration) + " seconds\nFinishing at around " + str(finishing_time.strftime("%H:%M:%S"))
+        # Readability for experiments below an hour
+        elif estimated_duration < 60*60:
+            estimated_duration_mins = int(estimated_duration / 60)
+            estimated_duration_secs = int(estimated_duration % 60)
 
-    # Readability for experiments below an hour
-    elif estimated_duration < 60*60:
-        estimated_duration_mins = int(estimated_duration / 60)
-        estimated_duration_secs = int(estimated_duration % 60)
+            estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds\nFinishing at around " + str(finishing_time.strftime("%H:%M:%S"))
 
-        estimation_message = f"{estimated_duration_mins} minutes and {estimated_duration_secs} seconds\nFinishing at around " + str(finishing_time.strftime("%H:%M:%S"))
+        # Experiments below a day
+        elif estimated_duration < 60*60*24:
+            estimated_duration_hours = int(estimated_duration / (60*60))
+            estimated_duration_mins = int((estimated_duration % (60*60))/60)
 
-    # Experiments below a day
-    elif estimated_duration < 60*60*24:
-        estimated_duration_hours = int(estimated_duration / (60*60))
-        estimated_duration_mins = int((estimated_duration % (60*60))/60)
+            estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes\nFinishing at around " + str(finishing_time.strftime("%H:%M"))
+        
+        # Experiments above
+        elif estimated_duration >= 60*60*24:
+            estimated_duration_days = int(estimated_duration / (60*60*24))
 
-        estimation_message = f"{estimated_duration_hours} hours and {estimated_duration_mins} minutes\nFinishing at around " + str(finishing_time.strftime("%H:%M"))
-    
-    # Experiments above
-    elif estimated_duration >= 60*60*24:
-        estimated_duration_days = int(estimated_duration / (60*60*24))
+            estimation_message = f"above {estimated_duration_days} days\nFinishing the " + str(finishing_time.strftime("%d/%m/%Y, %H")) + "h\nDon't you think you are pushing it just a little?..."
+        
 
-        estimation_message = f"above {estimated_duration_days} days\nFinishing the " + str(finishing_time.strftime("%d/%m/%Y, %H")) + "h\nDon't you think you are pushing it just a little?..."
-       
+        messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
 
-    messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
-
-
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
 
 def create_experiment_gui_from_dict(parameters_dict):
 
     experiment_name = parameters_dict["experiment_name"]
     time_constant = parameters_dict["time_constant"]
+    roll_off = parameters_dict["roll_off"]
     time_zero = parameters_dict["time_zero"]
     trip_legs = parameters_dict["trip_legs"]
     num_scans = parameters_dict["num_scans"]
@@ -791,6 +824,18 @@ def create_experiment_gui_from_dict(parameters_dict):
     row_num += 1
 
     # time constant can only be a series of values
+    filter_roll_off_table = [6, 12, 18, 24] # In dB/Oct
+
+    # Create Combobox to select time constant from
+    label = tk.Label(experiment_parameters_frame, text="filter roll-off [dB/oct]", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    combo = ttk.Combobox(experiment_parameters_frame, values=filter_roll_off_table, state="readonly")
+    combo.set(roll_off)  # Default value
+    combo.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+    entries["roll_off"] = combo
+    row_num += 1
+
+    # Filter roll-off can only be a series of values
     time_constant_table = [1e-6, 3e-6, 10e-6, 30e-6, 100e-6, 300e-6, 1e-3, 3e-3, 10e-3, 30e-3, 100e-3, 300e-3, 1, 3, 10, 30, 100, 300, 1e3, 3e3, 10e3, 30e3]
 
     # Create Combobox to select time constant from
@@ -807,7 +852,7 @@ def create_experiment_gui_from_dict(parameters_dict):
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     entry = tk.Entry(experiment_parameters_frame)
     entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
-    entry.insert(0, time_zero)
+    entry.insert(0, roll_off)
     entries["time_zero"] = entry
     row_num += 1
 
@@ -898,247 +943,313 @@ def create_experiment_gui_from_dict(parameters_dict):
 
 def edit_trip_legs():
 
-    global entries
-
-    # We first ask the user to input number of legs in the trip
-    num_legs = int(simpledialog.askstring("Input", "Please enter number of legs in the trip:"))
-
-    # We then construct a dict from which to construct the GUI later holding placeholder values
-    # but we should still preserve parameters that the user might care for
-    time_constant = float(entries["time_constant"].get())
-    time_zero = float(entries["time_zero"].get())
-    num_scans = int(entries["num_scans"].get())
-    new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": str(time_constant), "time_zero": str(time_zero), "num_scans": str(num_scans)}
-    
-    # We now append as many trip legs as requested
-    new_legs = {}
-    for leg_number in range(0, num_legs):
-        new_legs[str(leg_number)] = {"start [ps]": 0.0, "end [ps]": 0.0, "step [ps]": 0.0}
-
-    new_experiment_dict["trip_legs"] = new_legs
-
-    # And proceed to construct a new frame with the placeholder data, passing these arguments deletes
-    # the previously drawn frame Entries_Frame, experiment_preset
-    create_experiment_gui_from_dict(new_experiment_dict)
-
-
-
-############################### MAIN code starts here ###########################
-
-# Extract default configuration values for both devices from the configuration file
-with open('Utils\default_config.json', "r") as json_file:
-    default_config = json.load(json_file)
-
-default_values_delay_stage = default_config["Delay Stage Default Config Params"]
-default_values_lockin = default_config["Lockin Default Config Params"]
-
-
-
-############################### Start drawing GUI ###############################
-# Create the main window
-global main_window
-main_window = tk.Tk()
-main_window.title("Automatic Pump Probe")
-main_window.geometry("1200x550")
-
-# Easter egg
-day_of_the_week = datetime.datetime.today().weekday()
-if day_of_the_week == 5 or day_of_the_week == 6:
-    response = messagebox.askokcancel("What a dedicated employee", "I get you, science is cool, but you are at the lab on a weekend.\nPerhaps you should close up for today and get some rest\nWhat do you think?")
-    
-    if response:
-        close_window(main_window)
+    try:
+        global entries
+
+        # We first ask the user to input number of legs in the trip
+        num_legs = int(simpledialog.askstring("Input", "Please enter number of legs in the trip:"))
+
+        # We then construct a dict from which to construct the GUI later holding placeholder values
+        # but we should still preserve parameters that the user might care for
+        time_constant = float(entries["time_constant"].get())
+        roll_off = int(entries["roll_off"].get())
+        time_zero = float(entries["time_zero"].get())
+        num_scans = int(entries["num_scans"].get())
+        new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": str(time_constant), "roll_off": str(roll_off), "time_zero": str(time_zero), "num_scans": str(num_scans)}
+        
+        # We now append as many trip legs as requested
+        new_legs = {}
+        for leg_number in range(0, num_legs):
+            new_legs[str(leg_number)] = {"start [ps]": 0.0, "end [ps]": 0.0, "step [ps]": 0.0}
+
+        new_experiment_dict["trip_legs"] = new_legs
+
+        # And proceed to construct a new frame with the placeholder data, passing these arguments deletes
+        # the previously drawn frame Entries_Frame, experiment_preset
+        create_experiment_gui_from_dict(new_experiment_dict)
+
+    except Exception as e:
+            messagebox.showerror("Error", f"An error occurred:\n{e}")
+
+
+
+############################### MAIN CODE STARTS HERE ###########################
+def main():
+
+    ############################### Start drawing GUI ###############################
+    # Create the main window
+    global main_window
+    main_window = tk.Tk()
+    main_window.title("Automatic Pump Probe")
+    main_window.geometry("1200x550")
+
+    # The whole code is inside a try loop, exceptions are allowed to propagate upwards and are caught at the end showing an error messagebox
+    try:
+
+        # Mysterious snippet
+        day_of_the_week = datetime.datetime.today().weekday()
+        if day_of_the_week == 5 or day_of_the_week == 6:
+            response = messagebox.askokcancel("What a dedicated employee", "I get you, science is cool, but you are at the lab on a weekend.\nPerhaps you should close up for today and get some rest.\nWhat do you think?")
+            
+            if response:
+                close_window(main_window)
+
+        # Grab default configuration dict from default file
+        try:
+            # Extract default configuration values for both devices from the configuration file
+            default_config_file_path = 'Utils\default_config.json'
+            with open(default_config_file_path, "r") as json_file:
+                default_config = json.load(json_file)
+                
+        except Exception as e:
+            raise Exception(f"An error occured when opening {default_config_file_path}\n{e}")
+
+        default_values_delay_stage = default_config["Delay Stage Default Config Params"]
+        default_values_lockin = default_config["Lockin Default Config Params"]
+
+        # There are different screens (frames) in this GUI, each serves a different function 
+        # and must display different frames to change between them we must store them into a
+        # dict after building them
+        global Screens 
+        Screens = {}
+        # The data structure for the Screens dict is as follows:
+        #
+        # Screens = {
+        #     "Initialization screen": {
+        #         "Screen Frame": "Init_parent_frame",
+        #         "Child frames": {}
+        #         },
+        # 
+        #     "Experiment screen": {
+        #         "Screen Frame": "Exper_parent_frame", 
+        #         "Child frame": "Exper_child_frame_1"
+        #         }
+        # }
+        #
+        # Screens on the GUI are drawn with frames and stored as parent frames, these 
+        # need to be erased and drawn whenever the user changes screens so we need to 
+        # keep track of them in this dict, however sometimes the user will edit the 
+        # number of entries on the screen and we'll need to erase and redraw only certain 
+        # parts of the screen so we'll also keep these child frames on a child dict
+
+
+        ################################### Initialization Screen #########################
+        # We create a frame that will contain everything under this screen, this frame will
+        # be shown or hidden depending on what screen we want to display
+        Initialization_screen = tk.Frame(main_window)
+
+        Initialization_screen.grid(row=2, column=0, padx=10, pady=10)#, sticky="ew")
+        third_label = tk.Label(Initialization_screen, text="Third row label Child", anchor="w")
+        third_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+            
+
+        Screens["Initialization screen"] = {}
+        Screens["Initialization screen"]["Screen frame"] = Initialization_screen
+        Screens["Initialization screen"]["Child frame"] = None
 
 
-# There are different screens (frames) in this GUI, each serves a different function 
-# and must display different frames to change between them we must store them into a
-# dict after building them
-global Screens 
-Screens = {}
-# The data structure for the Screens dict is as follows:
-#
-# Screens = {
-#     "Initialization screen": {
-#         "Screen Frame": "Init_parent_frame",
-#         "Child frames": {}
-#         },
-# 
-#     "Experiment screen": {
-#         "Screen Frame": "Exper_parent_frame", 
-#         "Child frame": "Exper_child_frame_1"
-#         }
-# }
-#
-# Screens on the GUI are drawn with frames and stored as parent frames, these 
-# need to be erased and drawn whenever the user changes screens so we need to 
-# keep track of them in this dict, however sometimes the user will edit the 
-# number of entries on the screen and we'll need to erase and redraw only certain 
-# parts of the screen so we'll also keep these child frames on a child dict
+        # Add text (label) prompting user to introduce configuration parameters
+        label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
+        label.grid(row=0, column=0, padx=10, pady=5)#, sticky="w")
 
+        # The widgets will be placed in a grid with respect to each other,
+        # to define their separation we define a "no place" x and y pad radius measured 10px around them
+        # finally we specify "w" to format them to the left or west of their "cell"
+        row_num = 0
+        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
-################################### Initialization Screen #########################
-# We create a frame that will contain everything under this screen, this frame will
-# be shown or hidden depending on what screen we want to display
-Initialization_screen = tk.Frame(main_window)
+        # Place an empty label at the end to add some space
+        spacer = tk.Label(Initialization_screen, text="")  # An empty label
+        spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
+        row_num += 1
 
-Initialization_screen.grid(row=2, column=0, padx=10, pady=10)#, sticky="ew")
-third_label = tk.Label(Initialization_screen, text="Third row label Child", anchor="w")
-third_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-    
 
-Screens["Initialization screen"] = {}
-Screens["Initialization screen"]["Screen frame"] = Initialization_screen
-Screens["Initialization screen"]["Child frame"] = None
 
+        ############################### Frame for delay stage ###############################
+        # To create a section we use a frame which we will treat code wise as a window in which 
+        # to place our widgets, this has the added benefit of referencing these widgets on a new subgrid, 
+        # it's more modular too since we can rearrange the whole frame without loosing the reference
+        # between widgets  
 
-# Add text (label) prompting user to introduce configuration parameters
-label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
-label.grid(row=0, column=0, padx=10, pady=5)#, sticky="w")
+        # We place the frame indexing it to the initialization screen frame
+        delay_parameters_frame = tk.Frame(Initialization_screen)
+        delay_parameters_frame.grid(row=0, column=0, padx=10, pady=10, sticky="w")
 
-# The widgets will be placed in a grid with respect to each other,
-# to define their separation we define a "no place" x and y pad radius measured 10px around them
-# finally we specify "w" to format them to the left or west of their "cell"
-row_num = 0
-label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+        row_num = 0
+        label = tk.Label(delay_parameters_frame,  # Instead of placing the widget in the main window we now place it on the frame
+                            text="Delay stage parameters",
+                            anchor="w")
+        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+        row_num += 1
 
-# Place an empty label at the end to add some space
-spacer = tk.Label(Initialization_screen, text="")  # An empty label
-spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
-row_num += 1
 
+        for parameter, default_value in default_values_delay_stage.items():
 
+            # For every parameter add a short description with a label 
+            label = tk.Label(delay_parameters_frame, text=parameter, anchor="w")
+            label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
-############################### Frame for delay stage ###############################
-# To create a section we use a frame which we will treat code wise as a window in which 
-# to place our widgets, this has the added benefit of referencing these widgets on a new subgrid, 
-# it's more modular too since we can rearrange the whole frame without loosing the reference
-# between widgets  
+            # Add an entry box for the user to write a parameter on the cell and place it to the right
+            entry = tk.Entry(delay_parameters_frame)
+            entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
 
-# We place the frame indexing it to the initialization screen frame
-delay_parameters_frame = tk.Frame(Initialization_screen)
-delay_parameters_frame.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+            # Fill entry box with the default value
+            entry.insert(0, str(default_value))
 
-row_num = 0
-label = tk.Label(delay_parameters_frame,  # Instead of placing the widget in the main window we now place it on the frame
-                    text="Delay stage parameters",
-                    anchor="w")
-label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-row_num += 1
+            # Following labels and entry boxes will be written a row below
+            row_num += 1
 
+        # Spacing at the end of the section with empty labels
+        spacer = tk.Label(delay_parameters_frame, text="")  # An empty label
+        spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
 
-for parameter, default_value in default_values_delay_stage.items():
 
-    # For every parameter add a short description with a label 
-    label = tk.Label(delay_parameters_frame, text=parameter, anchor="w")
-    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
-    # Add an entry box for the user to write a parameter on the cell and place it to the right
-    entry = tk.Entry(delay_parameters_frame)
-    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+        ############################### Frame for lockin ###############################
+        # Repeat for lockin parameters
+        lockin_parameters_frame = tk.Frame(Initialization_screen)
+        lockin_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
 
-    # Fill entry box with the default value
-    entry.insert(0, str(default_value))
+        row_num = 0
+        label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
+        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+        row_num += 1
 
-    # Following labels and entry boxes will be written a row below
-    row_num += 1
+        # Add labels in succession
+        for parameter, default_value in default_values_lockin.items():
 
-# Spacing at the end of the section with empty labels
-spacer = tk.Label(delay_parameters_frame, text="")  # An empty label
-spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
+            # For every parameter the user will input add a short description with a label 
+            label = tk.Label(lockin_parameters_frame, text=parameter, anchor="w")
+            label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
+            # Add an entry box for the user to write a parameter on the cell and place it to the right
+            entry = tk.Entry(lockin_parameters_frame)
+            entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
 
+            # Fill entry box with the default value
+            entry.insert(0, str(default_value))
 
-############################### Frame for lockin ###############################
-# Repeat for lockin parameters
-lockin_parameters_frame = tk.Frame(Initialization_screen)
-lockin_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+            # Following labels and entry boxes will be written a row below
+            row_num += 1
 
-row_num = 0
-label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
-label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
-row_num += 1
+        # This button initializes the devices prior to running the experiment
+        button = tk.Button(Initialization_screen, text="Initialize devices", command=initialize_button)
+        button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 
-# Add labels in succession
-for parameter, default_value in default_values_lockin.items():
 
-    # For every parameter the user will input add a short description with a label 
-    label = tk.Label(lockin_parameters_frame, text=parameter, anchor="w")
-    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
 
-    # Add an entry box for the user to write a parameter on the cell and place it to the right
-    entry = tk.Entry(lockin_parameters_frame)
-    entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
 
-    # Fill entry box with the default value
-    entry.insert(0, str(default_value))
+        ################################### Experiment Configuration Screen #########################
+        # This screen holds the parameters to configure the experiment and visualize it
+        Experiment_screen = tk.Frame(main_window)
+        Screens["Experiment screen"] = {}
+        Screens["Experiment screen"]["Screen frame"] = Experiment_screen
 
-    # Following labels and entry boxes will be written a row below
-    row_num += 1
+        # Load experiment configuration parameters
+        experiment_preset_file_path = 'Utils\experiment_preset.json'
+        try:
+            with open(experiment_preset_file_path, "r") as json_file:
+                experiment_preset = json.load(json_file)
+        
+        except Exception as e:
+            raise Exception(f"An error occured when opening {experiment_preset_file_path}\n{e}")
 
-# This button initializes the devices prior to running the experiment
-button = tk.Button(Initialization_screen, text="Initialize devices", command=initialize_button)
-button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        # Create a frame for the entries alone so we can overwrite them when the user decides to add legs to the trip
+        Entries_frame = tk.Frame(Experiment_screen)
 
+        # We store this frame as a child frame of the Experiment screen frame
+        Screens["Experiment screen"]["Child frame"] = Entries_frame
 
+        # Initially we draw the GUI for the input loaded from the experiment preset into a dict
+        create_experiment_gui_from_dict(experiment_preset)
 
+        # We now ask the user if they want to edit the number of legs on the trip
+        button = tk.Button(Experiment_screen, text="Edit number of trip legs", command=edit_trip_legs)
+        button.grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
-################################### Experiment Configuration Screen #########################
-# This screen holds the parameters to configure the experiment and visualize it
-Experiment_screen = tk.Frame(main_window)
-Screens["Experiment screen"] = {}
-Screens["Experiment screen"]["Screen frame"] = Experiment_screen
+        # Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
+        button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
+        button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
-# Load experiment configuration parameters
-with open('Utils\experiment_preset.json', "r") as json_file:
-    experiment_preset = json.load(json_file)
+        # Inform user of expected experiment time before launching experiment
+        button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=estimate_experiment_timespan)
+        button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
 
-# Create a frame for the entries alone so we can overwrite them when the user decides to add legs to the trip
-Entries_frame = tk.Frame(Experiment_screen)
+        # This button launches a scan
+        button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, experiment_data_queue))
+        button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
-# We store this frame as a child frame of the Experiment screen frame
-Screens["Experiment screen"]["Child frame"] = Entries_frame
+        # Check for errors from thread
+        def check_for_errors():
+            """Check for errors in the queue and show them in a messagebox."""
+            try:
+                
+                # get_nowait() attempts to immediately get an error from queue
+                # but it throws an empty queue error if the queue is empty
+                error = error_queue.get_nowait()
 
-# Initially we draw the GUI for the input loaded from the experiment preset into a dict
-create_experiment_gui_from_dict(experiment_preset)
+                # If the queue is not empty it means we received an error and 
+                # the try block will not exit early allowing us to run the following line
+                messagebox.showerror("Error", str(error))
 
-# We now ask the user if they want to edit the number of legs on the trip
-button = tk.Button(Experiment_screen, text="Edit number of trip legs", command=edit_trip_legs)
-button.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+                # Continue listening for more future errors
+                main_window.after(100, check_for_errors)
 
-# Button to save experiment configuration parameters into a JSON. It'll also check for valid parameters and save them when user requests it
-button = tk.Button(Experiment_screen, text="Save parameters", command=partial(save_parameters, experiment_preset))
-button.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+            # If we receive no error message we check for errors again after 100ms
+            except queue.Empty:
+                main_window.after(100, check_for_errors)
 
-# Inform user of expected experiment time before launching experiment
-button = tk.Button(Experiment_screen, text="Estimate experiment timespan", command=estimate_experiment_timespan)
-button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
+        # Start checking for errors
+        check_for_errors()
 
-# This button launches a scan
-button = tk.Button(Experiment_screen, text="Launch experiment", command=partial(launch_experiment, experiment_data_queue))
-button.grid(row=0, column=3, padx=10, pady=5, sticky="w")
 
+        ################################### Top bar ###################################    
+        # Drop down menu to select different screens
+        menu_var = tk.StringVar(value="Initialization screen")  # Default value
+        screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
+        screen_menu.grid(row=0, column=0, padx=0, pady=0, sticky="w")
 
+        # Add a horizontal line (separator) below the dropdown menu
+        separator = ttk.Separator(main_window, orient="horizontal")
+        separator.grid(row=1, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
 
-################################### Top bar ###################################    
-# Drop down menu to select different screens
-menu_var = tk.StringVar(value="Initialization screen")  # Default value
-screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
-screen_menu.grid(row=0, column=0, padx=0, pady=0, sticky="w")
+        # Run first to show default screen when loading
+        show_screen(screen_name="Initialization screen", frame_type="Screen frame")
 
-# Add a horizontal line (separator) below the dropdown menu
-separator = ttk.Separator(main_window, orient="horizontal")
-separator.grid(row=1, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
+        # Ensure row 0 and row 1 stay fixed
+        main_window.grid_rowconfigure(0, weight=0)
+        main_window.grid_rowconfigure(1, weight=0)
 
-# Run first to show default screen when loading
-show_screen(screen_name="Initialization screen", frame_type="Screen frame")
+        # Ensure row 2 (Initialization_screen) expands properly
+        main_window.grid_rowconfigure(2, weight=0)
+        main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
 
-# Ensure row 0 and row 1 stay fixed
-main_window.grid_rowconfigure(0, weight=0)
-main_window.grid_rowconfigure(1, weight=0)
+        # Call the main window to draw the GUI
+        main_window.mainloop()
 
-# Ensure row 2 (Initialization_screen) expands properly
-main_window.grid_rowconfigure(2, weight=0)
-main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
 
-# Call the main window to draw the GUI
-main_window.mainloop()
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
+
+
+    # Close up threads
+    finally:
+
+        # These variables are initialized as global and None so that
+        # we can check whether they have been "filled" and then
+        # decide whether to act on them. This way we avoid erros
+        if fig is not None:
+            plt.close(fig)
+        
+        if experiment_thread is not None:
+            if experiment_thread.is_alive():
+                experiment_thread.join()
+
+        if initialization_thread is not None:
+            if initialization_thread.is_alive():
+                initialization_thread.join()
+
+        return None
+
+
+main()
