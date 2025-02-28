@@ -1,6 +1,6 @@
 {
-    "start [ps]": {"type": "float", "max": 4002.0, "min": 0.0}, 
-    "end [ps]": {"type": "float", "max": 4002.0, "min": 0.0}, 
+    "rel time start [ps]": {"type": "float", "max": 4002.0, "min": 0.0}, 
+    "rel time end [ps]": {"type": "float", "max": 4002.0, "min": 0.0}, 
     "step [ps]": {"type": "float", "max": 4002.0, "min": 6.68E-4}, 
     "experiment_title": {}
 }

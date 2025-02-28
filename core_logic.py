@@ -346,8 +346,8 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
     for leg_number, leg_parameters in parameters_dict["trip_legs"].items():
 
         # Extract scan parameters for each leg
-        start_position = leg_parameters["start [ps]"]
-        end_position = leg_parameters["end [ps]"]
+        start_position = leg_parameters["rel time start [ps]"]
+        end_position = leg_parameters["rel time end [ps]"]
         step_size = leg_parameters["step [ps]"]
 
         Position_within_limtis = True
@@ -542,7 +542,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
 
     # Create a DataFrame with headers
     data_df = pd.DataFrame({
-        "Time [ps]": Positions_relative,
+        "Relative Time [ps]": Positions_relative,
         "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
         "Signal level " + signal_type_str: Photodiode_data,
         "Signal error " + signal_type_str: Photodiode_data_errors
@@ -584,7 +584,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
 
 
 
-def close_devices(Troubleshooting):
+def close_devices(Troubleshooting=False):
     ########################### Close the device ###########################
     lib.BMC_StopPolling(serial_num, channel) # Does not return error codes
     
@@ -599,4 +599,6 @@ def close_devices(Troubleshooting):
 
     clfun.close_connection(adapter)
     print("Succesfully closed connection to lockin")
+
+    return True
             

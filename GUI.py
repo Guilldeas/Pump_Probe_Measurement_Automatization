@@ -28,16 +28,14 @@ import datetime
 #     measuring (V or I) both in graph and excel. Or a note to change that     [V]
 # 
 #   · Absolute values label on experiment screen and relative time on excel
-#      header                                                                  [ ]
+#      header                                                                  [V]
 #
-#    · Change from length of step to number of steps in leg and give length 
-#     on screen (or don't, they can ignore the last point when performing FFT) [ ]
+#
+#   · Average all scans while (or at the end) experiment are taking place      [ ]
 #
 #   · Build some documentation                                                 [ ]
 #       - Give little tutorial on how to change lockin parameters at
 #         nitialization                                                            [ ]
-#
-#   · Average all scans while (or at the end) experiment are taking place      [ ]
 #
 #    · Checkbox for error estimation                                           [ ]
 #
@@ -53,6 +51,9 @@ import datetime
 #       - Check for saturation in the buffer                                       [ ]
 #       - Make sure to grab only buffer lens that do not overlap with next points  [ ]
 #       - Average the buffer to a single value and store as single data point      [ ]
+#
+#    · Change from length of step to number of steps in leg and give length 
+#     on screen (or don't, they can ignore the last point when performing FFT) [ ]
 #
 # Less important TO DO list: No order in particular
 #   · Choose settling precission or at least verify
@@ -718,8 +719,8 @@ def estimate_experiment_timespan():
                 ### Calculate time speint on each step 
 
                 # Get the relevant parameters
-                start_position = screen_values["start [ps]"]
-                end_position = screen_values["end [ps]"]
+                start_position = screen_values["rel time start [ps]"]
+                end_position = screen_values["rel time end [ps]"]
                 step_size = screen_values["step [ps]"]
 
                 average_step_duration_sec = 2.2 + settling_time # Moving + settling time
@@ -823,10 +824,10 @@ def create_experiment_gui_from_dict(parameters_dict):
     entries["experiment_name"] = entry
     row_num += 1
 
-    # time constant can only be a series of values
+    # filter roll off can only be selected from a series of values
     filter_roll_off_table = [6, 12, 18, 24] # In dB/Oct
 
-    # Create Combobox to select time constant from
+    # Create Combobox to select filter roll off from
     label = tk.Label(experiment_parameters_frame, text="filter roll-off [dB/oct]", anchor="w")
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     combo = ttk.Combobox(experiment_parameters_frame, values=filter_roll_off_table, state="readonly")
@@ -835,7 +836,7 @@ def create_experiment_gui_from_dict(parameters_dict):
     entries["roll_off"] = combo
     row_num += 1
 
-    # Filter roll-off can only be a series of values
+    # time constant can only be selected from a series of values
     time_constant_table = [1e-6, 3e-6, 10e-6, 30e-6, 100e-6, 300e-6, 1e-3, 3e-3, 10e-3, 30e-3, 100e-3, 300e-3, 1, 3, 10, 30, 100, 300, 1e3, 3e3, 10e3, 30e3]
 
     # Create Combobox to select time constant from
@@ -848,11 +849,11 @@ def create_experiment_gui_from_dict(parameters_dict):
     row_num += 1
 
     # Time zero input
-    label = tk.Label(experiment_parameters_frame, text="time zero [ps]", anchor="w")
+    label = tk.Label(experiment_parameters_frame, text="abs time zero [ps]", anchor="w")
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     entry = tk.Entry(experiment_parameters_frame)
     entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
-    entry.insert(0, roll_off)
+    entry.insert(0, time_zero)
     entries["time_zero"] = entry
     row_num += 1
 
@@ -940,14 +941,23 @@ def create_experiment_gui_from_dict(parameters_dict):
     
 
 
-
 def edit_trip_legs():
 
     try:
         global entries
 
         # We first ask the user to input number of legs in the trip
-        num_legs = int(simpledialog.askstring("Input", "Please enter number of legs in the trip:"))
+        num_legs = simpledialog.askstring("Input", "Please enter number of legs in the trip:")
+
+        # If the user closes the simpledialog window without inputing a value simpledialog.asktring()
+        # will return a None and we return early
+        if num_legs is None:
+            return None
+
+        # If the user has input a value for the amount of legs we cast the it from str to int and proceed
+        else:
+            num_legs = int(num_legs)
+
 
         # We then construct a dict from which to construct the GUI later holding placeholder values
         # but we should still preserve parameters that the user might care for
@@ -960,7 +970,7 @@ def edit_trip_legs():
         # We now append as many trip legs as requested
         new_legs = {}
         for leg_number in range(0, num_legs):
-            new_legs[str(leg_number)] = {"start [ps]": 0.0, "end [ps]": 0.0, "step [ps]": 0.0}
+            new_legs[str(leg_number)] = {"rel time start [ps]": 0.0, "rel time end [ps]": 0.0, "step [ps]": 0.0}
 
         new_experiment_dict["trip_legs"] = new_legs
 
@@ -1248,6 +1258,9 @@ def main():
         if initialization_thread is not None:
             if initialization_thread.is_alive():
                 initialization_thread.join()
+
+        if adapter is not None:
+            core_logic.close_devices()
 
         return None
 
