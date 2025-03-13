@@ -15,6 +15,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 import matplotlib.pyplot as plt
 import os
 import datetime
+import webbrowser
 
 
 # TO DO list revised by Cris and Ankit: (Deadline: 1st of April)
@@ -788,6 +789,8 @@ def estimate_experiment_timespan():
     except Exception as e:
         messagebox.showerror("Error", f"An error occurred:\n{e}")
 
+
+
 def create_experiment_gui_from_dict(parameters_dict):
 
     experiment_name = parameters_dict["experiment_name"]
@@ -979,7 +982,34 @@ def edit_trip_legs():
         create_experiment_gui_from_dict(new_experiment_dict)
 
     except Exception as e:
-            messagebox.showerror("Error", f"An error occurred:\n{e}")
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
+
+
+def open_help_file():
+    # Get the directory of the current script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    help_file_path = os.path.join(current_dir, "Utils\X_WaveS_Automatic_Pump_Probe_Manual.pdf")
+
+    try:
+        could_open_file = webbrowser.open(r'file://' + help_file_path)
+
+        if not could_open_file:
+            print("Could not open help file")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
+
+
+
+def open_repository():
+    try:
+        could_open_file = webbrowser.open(r'https://github.com/Guilldeas/Pump_Probe_Measurement_Automatization')
+
+        if not could_open_file:
+            print("Could not open repository")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
 
 
 
@@ -1213,26 +1243,25 @@ def main():
         check_for_errors()
 
 
-        ################################### Top bar ###################################    
-        # Drop down menu to select different screens
-        menu_var = tk.StringVar(value="Initialization screen")  # Default value
-        screen_menu = tk.OptionMenu(main_window, menu_var, *Screens.keys(), command=show_screen_from_menu)
-        screen_menu.grid(row=0, column=0, padx=0, pady=0, sticky="w")
+        ################################### Top bar ###################################
 
-        # Add a horizontal line (separator) below the dropdown menu
-        separator = ttk.Separator(main_window, orient="horizontal")
-        separator.grid(row=1, column=0, padx=0, pady=0, sticky="ew")  # Fill horizontally, with padding
+        def donothing():
+            x = 0
+        
+        menubar = tk.Menu(main_window)
+        filemenu = tk.Menu(menubar, tearoff=0)
+        filemenu.add_command(label="Initialization screen", command=partial(show_screen_from_menu, "Initialization screen"))
+        filemenu.add_command(label="Experiment screen", command=partial(show_screen_from_menu, "Experiment screen"))
+        filemenu.add_separator()
+        filemenu.add_command(label="Exit", command=main_window.quit)
+        menubar.add_cascade(label="File", menu=filemenu)
 
-        # Run first to show default screen when loading
-        show_screen(screen_name="Initialization screen", frame_type="Screen frame")
+        helpmenu = tk.Menu(menubar, tearoff=0)
+        helpmenu.add_command(label="Open Help File", command=open_help_file)
+        helpmenu.add_command(label="Open repository", command=open_repository)
+        menubar.add_cascade(label="Help", menu=helpmenu)
 
-        # Ensure row 0 and row 1 stay fixed
-        main_window.grid_rowconfigure(0, weight=0)
-        main_window.grid_rowconfigure(1, weight=0)
-
-        # Ensure row 2 (Initialization_screen) expands properly
-        main_window.grid_rowconfigure(2, weight=0)
-        main_window.grid_columnconfigure(0, weight=1)  # Allow width expansion
+        main_window.config(menu=menubar)
 
         # Call the main window to draw the GUI
         main_window.mainloop()
