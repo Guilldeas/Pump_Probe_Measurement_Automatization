@@ -20,42 +20,18 @@ import webbrowser
 
 # TO DO list revised by Cris and Ankit: (Deadline: 1st of April)
 #
-#   · Errors should not fail silently                                          [V]
-#       - Try loop to all GUI                                                      [V]
-#       - Solve error propagations on nested try blocks:                           [V]
-#       - Solve error propagations on thread:                                      [V]
-#
-#   · The label for the data should be changed accordingly to what we were
-#     measuring (V or I) both in graph and excel. Or a note to change that     [V]
-# 
-#   · Absolute values label on experiment screen and relative time on excel
-#      header                                                                  [V]
-#
-#
+#   · Verify I've corrected oversight where relative time limits are checked against 0 
+#     and 4002, not against 0 - timezero and 4002 - timezero                   [V]
+#  
+#   · Checkbox for error estimation, list for autorange (manual, at the 
+#     beginning, at every step)                                                [ ]
+#  
 #   · Average all scans while (or at the end) experiment are taking place      [ ]
 #
-#   · Build some documentation                                                 [ ]
-#       - Give little tutorial on how to change lockin parameters at
-#         nitialization                                                            [ ]
+#   · Build documentation                                                      [ ]
 #
-#    · Checkbox for error estimation, list for autorange (manual, at the 
-#      beginning, at every step)                                               [ ]
+#   · Fix layout on monitoring window                                          [ ]
 #
-#    · Safely close at the end, something gets hung up                         [ ]
-#
-#    · Read from buffer instead to avoid saturation                            [ ]
-#       - Calculate settling time with both filter settling and filter drop-off    [V]
-#       - Grab buffer size but only the data points gathered after settling        [ ]
-#           * RS-232 does not support grabing the whole buffer at once (CAPTUREGET) and grabbing it 
-#             value after value is prohibitely slow, changing interfaces to GPIB could
-#             be a solution...
-#             
-#       - Check for saturation in the buffer                                       [ ]
-#       - Make sure to grab only buffer lens that do not overlap with next points  [ ]
-#       - Average the buffer to a single value and store as single data point      [ ]
-#
-#    · Change from length of step to number of steps in leg and give length 
-#     on screen (or don't, they can ignore the last point when performing FFT) [ ]
 #
 # Less important TO DO list: No order in particular
 #   · Choose settling precission or at least verify
@@ -350,16 +326,21 @@ def is_value_valid(parameter_name, parameter_value, parameter_rules):
                     parameter_value = float(parameter_value)
 
                 except ValueError:
-                    messagebox.showinfo("Could not save parameters", f"Parameter {parameter_name} is not a valid floating point number, please use .  as decimal separator")
+                    messagebox.showinfo("Error", f"Parameter {parameter_name} is not a valid floating point number, please use .  as decimal separator")
                     return False, None
 
         # Other rules specify a range of values
-        if rule_type == "max" and parameter_value > rule_value:
-            messagebox.showinfo("Could not save parameters", f"Parameter {parameter_name} is above maximum limit: {rule_value}")
+
+        # This is kind of hacky but rule values are specified in relative time and parameters_values in absolute time
+        # so we gotta substract time_zero to compare them in the same scale 
+        time_zero =  float(entries["time_zero"].get())
+        if rule_type == "max" and parameter_value > rule_value - time_zero:
+            
+            messagebox.showinfo("Error", f"Parameter {parameter_name} is above maximum limit: {rule_value - time_zero}")
             return False, None
         
-        if rule_type == "min" and parameter_value < rule_value:
-            messagebox.showinfo("Could not save parameters", f"Parameter {parameter_name} is below minimum limit: {rule_value}")
+        if rule_type == "min" and parameter_value < rule_value - time_zero:
+            messagebox.showinfo("Error", f"Parameter {parameter_name} is below minimum limit: {rule_value - time_zero}")
             return False, None
     
 
@@ -721,8 +702,8 @@ def estimate_experiment_timespan():
                 ### Calculate time speint on each step 
 
                 # Get the relevant parameters
-                start_position = screen_values["rel time start [ps]"]
-                end_position = screen_values["rel time end [ps]"]
+                start_position = screen_values["abs time start [ps]"]
+                end_position = screen_values["abs time end [ps]"]
                 step_size = screen_values["step [ps]"]
 
                 average_step_duration_sec = 2.2 + settling_time # Moving + settling time
@@ -853,7 +834,7 @@ def create_experiment_gui_from_dict(parameters_dict):
     row_num += 1
 
     # Time zero input
-    label = tk.Label(experiment_parameters_frame, text="abs time zero [ps]", anchor="w")
+    label = tk.Label(experiment_parameters_frame, text="rel time zero [ps]", anchor="w")
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     entry = tk.Entry(experiment_parameters_frame)
     entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
@@ -974,7 +955,7 @@ def edit_trip_legs():
         # We now append as many trip legs as requested
         new_legs = {}
         for leg_number in range(0, num_legs):
-            new_legs[str(leg_number)] = {"rel time start [ps]": 0.0, "rel time end [ps]": 0.0, "step [ps]": 0.0}
+            new_legs[str(leg_number)] = {"abs time start [ps]": 0.0, "abs time end [ps]": 0.0, "step [ps]": 0.0}
 
         new_experiment_dict["trip_legs"] = new_legs
 
