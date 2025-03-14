@@ -38,7 +38,8 @@ import webbrowser
 #       - Give little tutorial on how to change lockin parameters at
 #         nitialization                                                            [ ]
 #
-#    · Checkbox for error estimation                                           [ ]
+#    · Checkbox for error estimation, list for autorange (manual, at the 
+#      beginning, at every step)                                               [ ]
 #
 #    · Safely close at the end, something gets hung up                         [ ]
 #
