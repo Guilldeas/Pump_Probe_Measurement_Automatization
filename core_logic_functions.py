@@ -211,8 +211,8 @@ def move_to_position(lib, serial_num, channel, delay_ps):
     mm_to_ps = 1 / ps_to_mm
     #print(f'     Arrived at position: {round(real_pos.value * mm_to_ps, 2)}ps')
 
-    # Return position at the end of movement in ps
-    return real_pos.value * mm_to_ps
+    # Return achieved delay after displacement
+    return 2 * real_pos.value * mm_to_ps
 
 
 
