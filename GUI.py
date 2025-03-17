@@ -24,8 +24,10 @@ import webbrowser
 #     and 4002, not against 0 - timezero and 4002 - timezero                   [V]
 #  
 #   · Checkbox for error estimation, list for autorange (manual, at the 
-#     beginning, at every step)                                                [ ]
+#     beginning, at every step)                                                [V]
 #  
+#   · Verify time zero is safe                                                 [ ]
+#
 #   · Average all scans while (or at the end) experiment are taking place      [ ]
 #
 #   · Build documentation                                                      [ ]
@@ -176,7 +178,7 @@ def initialization_thread_logic():
 
 
 
-def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue, fig, num_scans, monitoring_window):
+def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue, fig, num_scans, monitoring_window, error_measurement_type, autoranging_type):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
@@ -185,7 +187,14 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue,
 
             # Perform experiment and get data at the end
             abort_queue.put(False)  # before we start the experiment we reset the abort flag to false
-            result = core_logic.perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan, num_scans)
+            result = core_logic.perform_experiment(parameters_dict, 
+                                                   experiment_data_queue, 
+                                                   abort_queue, 
+                                                   fig, 
+                                                   scan, 
+                                                   num_scans, 
+                                                   error_measurement_type,
+                                                   autoranging_type) 
 
             # User has chosen to abort experiment and thus we receive an error code instead
             if isinstance(result, int):
@@ -292,7 +301,7 @@ def is_value_valid(parameter_name, parameter_value, parameter_rules):
     This function takes a value that's previously been fetched from 
     the user and checks whether the value adheres to certain rules 
     located on a "rules" dict, it returns a True if the value checks 
-    all rules or a False whenever one rule is not checked. Additionaly
+    all rules or a False whenever oneor more rules are not checked. Additionaly
     it returns the value correctly casted to it's specified type
     '''
 
@@ -331,16 +340,26 @@ def is_value_valid(parameter_name, parameter_value, parameter_rules):
 
         # Other rules specify a range of values
 
-        # This is kind of hacky but rule values are specified in relative time and parameters_values in absolute time
-        # so we gotta substract time_zero to compare them in the same scale 
+        # This is kind of hacky but some parameters_values are specified in relative time and others in absolute time
+        # (see help file for an explanation on asolute and relative time) To solve this we gotta substract time_zero to compare
+        # absolute parameter values against relative limit delays. 
         time_zero =  float(entries["time_zero"].get())
-        if rule_type == "max" and parameter_value > rule_value - time_zero:
+        if rule_type == "max_abs" and parameter_value > rule_value - time_zero:
             
-            messagebox.showinfo("Error", f"Parameter {parameter_name} is above maximum limit: {rule_value - time_zero}")
+            messagebox.showinfo("Error", f"Parameter {parameter_name} is above maximum limit: {rule_value - time_zero}\n")
             return False, None
         
-        if rule_type == "min" and parameter_value < rule_value - time_zero:
+        if rule_type == "min_abs" and parameter_value < rule_value - time_zero:
             messagebox.showinfo("Error", f"Parameter {parameter_name} is below minimum limit: {rule_value - time_zero}")
+            return False, None
+        
+        if rule_type == "max_rel" and parameter_value > rule_value:
+            
+            messagebox.showinfo("Error", f"Parameter {parameter_name} is above maximum limit: {rule_value}")
+            return False, None
+        
+        if rule_type == "min_rel" and parameter_value < rule_value:
+            messagebox.showinfo("Error", f"Parameter {parameter_name} is below minimum limit: {rule_value}")
             return False, None
     
 
@@ -404,11 +423,30 @@ def get_parse_validate_screen_params(entries_widgets):
 
 def save_parameters(experiment_preset):
     
+    global entries
+    
     try:
         trip_legs = experiment_preset["trip_legs"]
 
+
+        ### We first validate that the time zero parameter is safe (all absolute parameters reference time zero)
+        validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+        try:
+            with open(validation_rules_file_path, "r") as json_file:
+                validation_rules = json.load(json_file)
+        except Exception as e:
+            raise Exception(f"An error occured when opening {validation_rules_file_path}\n{e}")
+
+
+        valid_parameter, _ = is_value_valid("time_zero", 
+                                                       entries["time_zero"].get(), 
+                                                       validation_rules["time_zero"])
+        if not valid_parameter:
+                return
+
+        ### We then proceed to validate all other risky parameters
+
         # We create empty presets to store parameters after validation
-        global entries
         trip_legs_entries = entries["trip_legs"]
         experiment_preset_save = {}
         trip_legs_save = {}
@@ -422,11 +460,14 @@ def save_parameters(experiment_preset):
             
             # If the parameters for this particular leg were correct we keep them on a dict
             trip_legs_save[leg_number] = screen_parameters
-        
+
+
         # Finally we construct a dict to save it by getting the parameters from screen that don't need to save the validated
         experiment_preset_save["experiment_name"] = entries["experiment_name"].get()
         experiment_preset_save["time_constant"] = float(entries["time_constant"].get())
         experiment_preset_save["roll_off"] = int(entries["roll_off"].get())
+        experiment_preset_save["error_measurement_type"] = str(entries["error_measurement_type"].get())
+        experiment_preset_save["autoranging_type"] = str(entries["autoranging_type"].get())
         experiment_preset_save["time_zero"] = float(entries["time_zero"].get())
         experiment_preset_save["num_scans"] = int(entries["num_scans"].get())
         experiment_preset_save["trip_legs"] = trip_legs_save
@@ -467,6 +508,24 @@ def launch_experiment(experiment_data_queue):
             }
         
         trip_legs_parsed = {}
+
+
+        ### We first validate that the time zero parameter is safe (all absolute parameters reference time zero)
+        validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+        try:
+            with open(validation_rules_file_path, "r") as json_file:
+                validation_rules = json.load(json_file)
+        except Exception as e:
+            raise Exception(f"An error occured when opening {validation_rules_file_path}\n{e}")
+
+
+        valid_parameter, _ = is_value_valid("time_zero", 
+                                                       entries["time_zero"].get(), 
+                                                       validation_rules["time_zero"])
+        if not valid_parameter:
+                return
+
+        ### We then proceed to validate all other risky parameters
 
         # Validate and parse iteratively
         for leg_number, leg_entries in Legs_entries.items():
@@ -587,8 +646,17 @@ def launch_experiment(experiment_data_queue):
 
         # Run experiment on a different thread
         num_scans = int(entries["num_scans"].get())
+        error_measurement_type = str(entries["error_measurement_type"].get())
+        autoranging_type = str(entries["autoranging_type"].get())
         experiment_thread = threading.Thread(target=experiment_thread_logic, 
-                                                args=(experiment_parameters, experiment_data_queue, abort_queue, fig, num_scans, monitoring_window))
+                                                args=(experiment_parameters, 
+                                                      experiment_data_queue, 
+                                                      abort_queue, 
+                                                      fig, 
+                                                      num_scans, 
+                                                      monitoring_window, 
+                                                      error_measurement_type,
+                                                      autoranging_type))
         experiment_thread.start()
 
         global prev_scan
@@ -690,6 +758,24 @@ def estimate_experiment_timespan():
         settling_time = core_logic.request_settling_time(time_constant, filter_slope=roll_off, verbose=False)
         estimated_duration = 0
 
+
+        ### We first validate that the time zero parameter is safe (all absolute parameters reference time zero)
+        validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+        try:
+            with open(validation_rules_file_path, "r") as json_file:
+                validation_rules = json.load(json_file)
+        except Exception as e:
+            raise Exception(f"An error occured when opening {validation_rules_file_path}\n{e}")
+
+
+        valid_parameter, _ = is_value_valid("time_zero", 
+                                                       entries["time_zero"].get(), 
+                                                       validation_rules["time_zero"])
+        if not valid_parameter:
+                return
+
+        ### We then proceed to validate all other risky parameters
+
         # Iterate through dict containing all trip legs
         for leg_entries in Legs_entries.values():
 
@@ -709,18 +795,18 @@ def estimate_experiment_timespan():
                 average_step_duration_sec = 2.2 + settling_time # Moving + settling time
                 average_step_duration_sec += 1.1 # Capturing data
                 
-                # PLACEHOLDER: Add time for optional steps 
-                autoscaling = True
-                if autoscaling:
+                # Add up time to every step depending on step configuration
+                error_measurement_type = entries["error_measurement_type"].get()
+                if error_measurement_type == "At every point":
+                    average_step_duration_sec += 2.2
+
+                autoranging_type = entries["autoranging_type"].get()
+                if autoranging_type == "At every point":
+                    # Autoscale
                     average_step_duration_sec += 1.2
 
-                autoranging = True
-                if autoranging:
+                    # Autorange
                     average_step_duration_sec += 0.1
-                
-                estimating_error = True
-                if estimating_error:
-                    average_step_duration_sec += 2.2
 
                 ### Accumulate for all steps on each leg                
                 num_steps = ceil( (end_position - start_position) / step_size )
@@ -731,6 +817,20 @@ def estimate_experiment_timespan():
 
         # Finally multiply times the amount of scans selected
         estimated_duration = estimated_duration * num_scans
+
+        # Add up one final time at the end when the user asks to only measure errors once
+        error_measurement_type = entries["error_measurement_type"].get()
+        if error_measurement_type == "Once at the start":
+            estimated_duration += 2.2
+
+        autoranging_type = entries["autoranging_type"].get()
+        if autoranging_type == "Once at time zero":
+ 
+            # Autoscale
+            estimated_duration += 1.2
+
+            # Autorange
+            estimated_duration += 0.1
 
         # At the end of the estimation we create a message for the user
         estimation_message = ""
@@ -768,6 +868,9 @@ def estimate_experiment_timespan():
 
         messagebox.showinfo("Estimation", f"Experiment is estimated to take {estimation_message}")
 
+    except ZeroDivisionError:
+        messagebox.showerror("Error", f"An error occurred:\nZero length step size caused division by zero. Please enter a valid length")
+
     except Exception as e:
         messagebox.showerror("Error", f"An error occurred:\n{e}")
 
@@ -778,6 +881,8 @@ def create_experiment_gui_from_dict(parameters_dict):
     experiment_name = parameters_dict["experiment_name"]
     time_constant = parameters_dict["time_constant"]
     roll_off = parameters_dict["roll_off"]
+    error_measurement_type = parameters_dict["error_measurement_type"]
+    autoranging_type = parameters_dict["autoranging_type"]
     time_zero = parameters_dict["time_zero"]
     trip_legs = parameters_dict["trip_legs"]
     num_scans = parameters_dict["num_scans"]
@@ -831,6 +936,26 @@ def create_experiment_gui_from_dict(parameters_dict):
     combo.set(time_constant)  # Default value
     combo.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
     entries["time_constant"] = combo
+    row_num += 1
+
+    # Create Combobox to select how to measure errors
+    error_measurement_table = ["Never", "Once at the start", "At every point"]
+    label = tk.Label(experiment_parameters_frame, text="Error measurement type", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    combo = ttk.Combobox(experiment_parameters_frame, values=error_measurement_table, state="readonly")
+    combo.set(error_measurement_type)  # Default value
+    combo.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+    entries["error_measurement_type"] = combo
+    row_num += 1
+
+    # Create Combobox to select how to autorange
+    autoranging_table = ["Never", "Once at time zero", "At every point"]
+    label = tk.Label(experiment_parameters_frame, text="Autoranging type", anchor="w")
+    label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+    combo = ttk.Combobox(experiment_parameters_frame, values=autoranging_table, state="readonly")
+    combo.set(autoranging_type)  # Default value
+    combo.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
+    entries["autoranging_type"] = combo
     row_num += 1
 
     # Time zero input
@@ -946,11 +1071,21 @@ def edit_trip_legs():
 
         # We then construct a dict from which to construct the GUI later holding placeholder values
         # but we should still preserve parameters that the user might care for
+        experiment_name = str(entries["experiment_name"].get())
         time_constant = float(entries["time_constant"].get())
         roll_off = int(entries["roll_off"].get())
+        error_measurement_type = str(entries["error_measurement_type"].get())
+        autoranging_type = str(entries["autoranging_type"].get())
         time_zero = float(entries["time_zero"].get())
         num_scans = int(entries["num_scans"].get())
-        new_experiment_dict = {"experiment_name": "new_experiment", "time_constant": str(time_constant), "roll_off": str(roll_off), "time_zero": str(time_zero), "num_scans": str(num_scans)}
+
+        new_experiment_dict = {"experiment_name": str(experiment_name), 
+                               "time_constant": str(time_constant), 
+                               "roll_off": str(roll_off), 
+                               "error_measurement_type": str(error_measurement_type), 
+                               "autoranging_type": str(autoranging_type), 
+                               "time_zero": str(time_zero), 
+                               "num_scans": str(num_scans)}
         
         # We now append as many trip legs as requested
         new_legs = {}

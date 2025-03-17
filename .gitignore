@@ -1,8 +1,9 @@
 # Ignore virtual environment
 Measurement_Automatization_venv/
 
-# Ignore the srsinst.sr860 folder
+# Ignore certain folders
 srsinst.sr860/
+__pycache__/
 
 # Ignore all output files
 *.csv

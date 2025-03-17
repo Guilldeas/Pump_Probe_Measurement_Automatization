@@ -128,6 +128,7 @@ def move_to_position(lib, serial_num, channel, delay_ps):
 
     # Since light moves back and forth through the delay stage 
     # the position the stage needs to travel to is only half the distance
+    # of the desired optical path
     position = distance_mm / 2
 
     # Convert from real units to device units [steps]
@@ -144,7 +145,6 @@ def move_to_position(lib, serial_num, channel, delay_ps):
     elif Troubleshooting:
             print(f"    · BMC_GetDeviceUnitFromRealValue passed without raising errors")
 
-    #print(f"    · Moving stage to position: {round(new_pos_real.value, 2)} [mm]")
     if Troubleshooting:
         print(f"    · That position in device units is: {new_pos_dev.value} [dev units]")
 

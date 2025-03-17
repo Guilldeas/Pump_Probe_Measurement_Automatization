@@ -1,1 +1,1 @@
-{"experiment_name": "new_experiment", "time_constant": 1e-06, "roll_off": 6, "time_zero": 500.0, "num_scans": 1, "trip_legs": {"0": {"abs time start [ps]": 0.0, "abs time end [ps]": 100.0, "step [ps]": 50.0}}}
+{"experiment_name": "rwgjmryk", "time_constant": 1e-06, "roll_off": 6, "error_measurement_type": "Never", "autoranging_type": "Once at time zero", "time_zero": 0.0, "num_scans": 1, "trip_legs": {"0": {"abs time start [ps]": 0.0, "abs time end [ps]": 0.0, "step [ps]": 4002.0}}}

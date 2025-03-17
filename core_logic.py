@@ -311,7 +311,7 @@ def initialization(Troubleshooting):
 
     
     
-def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan, num_scans):
+def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan, num_scans, error_measurement_type, autoranging_type):
 
     global adapter
 
@@ -346,8 +346,8 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
     for leg_number, leg_parameters in parameters_dict["trip_legs"].items():
 
         # Extract scan parameters for each leg
-        start_position = leg_parameters["rel time start [ps]"]
-        end_position = leg_parameters["rel time end [ps]"]
+        start_position = leg_parameters["abs time start [ps]"]
+        end_position = leg_parameters["abs time end [ps]"]
         step_size = leg_parameters["step [ps]"]
 
         Position_within_limtis = True
@@ -376,16 +376,6 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
                 if (end_position not in Positions):
                     Positions.append(end_position)
 
-    # We have now concocted a list of positions which are relative to the 0 position of 
-    # the delay stage, that is: 0ps is 0mm of displacement from the home position, 
-    # however the user needs to store data and visualize it relative to the specified 
-    # "time zero" in the experiment, we need to keep track of both
-    time_zero = parameters_dict["time_zero"]
-
-    Positions_relative = []
-    for position in Positions:
-        Positions_relative.append(position - time_zero)
-
 
     # We create empty lists to hold the captured data and error values
     Photodiode_data = []
@@ -403,7 +393,16 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
         estimating = []
         total = []
 
-
+    if error_measurement_type == "Once at the start":
+                print(f"    ·Measuring error only at the start\n")
+                Photodiode_data_error = clfun.request_R_noise(adapter)
+    
+    time_zero = parameters_dict["time_zero"]
+    if autoranging_type == "Once at time zero":
+                print(f"    ·Autoranging only once, at the highest expected signal\n")
+                position_ps = clfun.move_to_position(lib, serial_num, channel, delay_ps=time_zero)
+                clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
+                clfun.autorange(adapter)
 
     ########################### Scan and Measure at list of positions ###########################
     for index in range(0, len(Positions)):
@@ -427,7 +426,10 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
             startup_timestamp = time.time()
 
         print(f"Measurement at step: {index+1} of {len(Positions)}")
-        position_ps = clfun.move_to_position(lib, serial_num, channel, delay_ps=Positions[index])   # Move
+        
+        
+        ### Moving stage
+        position_ps = clfun.move_to_position(lib, serial_num, channel, delay_ps=Positions[index] + time_zero)
         print(f"    ·Delay set to {round(position_ps - time_zero, 2)}ps")
 
         # For every function ran in the loop we store how much time it takes to run it
@@ -435,37 +437,53 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
             moved_timestamp = time.time()
             moving.append(moved_timestamp - startup_timestamp)
 
+
+        ### Awaiting for filter settling
         print(f"    ·Awaiting {settling_time}s for filter settling")
-        time.sleep(settling_time)                                                                     # Settle
+        time.sleep(settling_time)
         if profiling:
             settled_timestamp = time.time()
             settling.append(settled_timestamp - moved_timestamp)
 
-        print(f"    ·Capturing data")                                                                 # Capture
-        clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
-        if profiling:
-            autoscaled_timestamp = time.time()
-            autoscaling.append(autoscaled_timestamp - settled_timestamp)
 
-        clfun.autorange(adapter)
-        if profiling:
-            autoranged_timestamp = time.time()
-            autoranging.append(autoranged_timestamp - autoscaled_timestamp)
+        ### Capturing data
+        print(f"    ·Capturing data")
+        if autoranging_type == "At every point":
+            clfun.set_sensitivity(adapter, clfun.find_next_sensitivity(adapter))
+            if profiling:
+                autoscaled_timestamp = time.time()
+                autoscaling.append(autoscaled_timestamp - settled_timestamp)
+
+            clfun.autorange(adapter)
+            if profiling:
+                autoranged_timestamp = time.time()
+                autoranging.append(autoranged_timestamp - autoscaled_timestamp)
+    
+            if profiling:
+                data_captured_timestamp = time.time()
+                capturing.append(data_captured_timestamp - autoranged_timestamp)
 
         Photodiode_data.append(clfun.request_R(adapter))
-        if profiling:
-            data_captured_timestamp = time.time()
-            capturing.append(data_captured_timestamp - autoranged_timestamp)
 
-        print(f"    ·Measuring error\n")
-        Photodiode_data_errors.append(clfun.request_R_noise(adapter))
-        if profiling:
-            error_estimated_timestamp = time.time()
-            estimating.append(error_estimated_timestamp - data_captured_timestamp)
+
+        ### Measuring errors
+        if error_measurement_type == "At every point":
+            print(f"    ·Measuring error\n")
+            Photodiode_data_errors.append(clfun.request_R_noise(adapter))
+            if profiling:
+                error_estimated_timestamp = time.time()
+                estimating.append(error_estimated_timestamp - data_captured_timestamp)
         
+        elif error_measurement_type == "Once at the start":
+                Photodiode_data_errors.append(Photodiode_data_error)
+        
+
+        ### Rounding up total elapsed time
         if profiling:
             total_timestamp = time.time() - startup_timestamp
             total.append(total_timestamp)
+
+
 
         # Send data through queue to the GUI script to draw it. Do it with copies or else
         # we'll pass references to the local lists "Photodiode_data" and the GUI will
@@ -477,7 +495,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
         data_packet = {
                         "Photodiode data": Photodiode_data.copy(), 
                         "Photodiode data errors": Photodiode_data_errors.copy(),
-                        "Positions": Positions_relative.copy(),
+                        "Positions": Positions.copy(),
                         "Scan number": scan
                       }
         experiment_data_queue.put(data_packet)
@@ -490,11 +508,15 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
         print(f"The average time and percentage spent on each step for every action taken was:")
         print(f'    ·Moving stage : {round((sum(moving)/len(moving)), 1)}s and {round( 100 * (sum(moving)/len(moving)) / (sum(total)/len(total)), 1)}% of total\n')
         print(f'    ·Settling filter : {round((sum(settling)/len(settling)), 1)}s and {round( 100 * (sum(settling)/len(settling)) / (sum(total)/len(total)), 1)}%\n')
-        print(f'    ·Autoscaling lockin : {round((sum(autoscaling)/len(autoscaling)), 1)}s and {round( 100 * (sum(autoscaling)/len(autoscaling)) / (sum(total)/len(total)), 1)}%\n')
-        print(f'    ·Autoranging lockin : {round((sum(autoranging)/len(autoranging)), 1)}s and {round( 100 * (sum(autoranging)/len(autoranging)) / (sum(total)/len(total)), 1)}%\n')
-        print(f'    ·Capturing data : {round((sum(capturing)/len(capturing)), 1)}s and {round( 100 * (sum(capturing)/len(capturing)) / (sum(total)/len(total)), 1)}%\n')
-        print(f'    ·Estimating error from lockin : {round((sum(estimating)/len(estimating)), 1)}s and {round( 100 * (sum(estimating)/len(estimating)) / (sum(total)/len(total)), 1)}%\n')
+    
+        if error_measurement_type == "At every point":
+            print(f'    ·Estimating error from lockin : {round((sum(estimating)/len(estimating)), 1)}s and {round( 100 * (sum(estimating)/len(estimating)) / (sum(total)/len(total)), 1)}%\n')
 
+        if autoranging_type == "At every point":
+            print(f'    ·Autoscaling lockin : {round((sum(autoscaling)/len(autoscaling)), 1)}s and {round( 100 * (sum(autoscaling)/len(autoscaling)) / (sum(total)/len(total)), 1)}%\n')
+            print(f'    ·Autoranging lockin : {round((sum(autoranging)/len(autoranging)), 1)}s and {round( 100 * (sum(autoranging)/len(autoranging)) / (sum(total)/len(total)), 1)}%\n')
+            print(f'    ·Capturing data : {round((sum(capturing)/len(capturing)), 1)}s and {round( 100 * (sum(capturing)/len(capturing)) / (sum(total)/len(total)), 1)}%\n')
+        
     
     # To find the positional error we'll need to convert position error from mm to ps
     # According to the datasheet for the ODL600M delay stage used in this experiment the "absolute on 
@@ -516,11 +538,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
     # Get the directory of the current script
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Get the parent directory
-    #parent_dir = os.path.dirname(current_dir)
-
     # Define the Output folder path
-    #output_folder = os.path.join(parent_dir, "Output")
     output_folder = os.path.join(current_dir, "Output")
 
     # Create the Output folder if it doesn't exist
@@ -541,13 +559,29 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
             signal_type_str = "[Arms]"
 
     # Create a DataFrame with headers
-    data_df = pd.DataFrame({
-        "Relative Time [ps]": Positions_relative,
-        "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
-        "Signal level " + signal_type_str: Photodiode_data,
-        "Signal error " + signal_type_str: Photodiode_data_errors
-    })
-
+    if error_measurement_type == "At every point":
+        data_df = pd.DataFrame({
+            "Absolute Time [ps]": Positions,
+            "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+            "Signal level " + signal_type_str: Photodiode_data,
+            "Signal error " + signal_type_str: Photodiode_data_errors
+        })
+    
+    if error_measurement_type == "Once at the start":
+        data_df = pd.DataFrame({
+            "Absolute Time [ps]": Positions,
+            "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+            "Signal level " + signal_type_str: Photodiode_data,
+            "Signal error (at the start)" + signal_type_str: Photodiode_data_errors
+        })
+    
+    elif error_measurement_type == "Never":
+        data_df = pd.DataFrame({
+            "Absolute Time [ps]": Positions,
+            "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+            "Signal level " + signal_type_str: Photodiode_data,
+        })
+    
     # Get current date as a string
     date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
 

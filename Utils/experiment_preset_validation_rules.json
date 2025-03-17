@@ -1,6 +1,7 @@
 {
-    "abs time start [ps]": {"type": "float", "max": 4002.0, "min": 0.0},
-    "abs time end [ps]": {"type": "float", "max": 4002.0, "min": 0.0}, 
-    "step [ps]": {"type": "float", "max": 4002.0, "min": 6.68E-4}, 
+    "abs time start [ps]": {"type": "float", "max_abs": 4002.0, "min_abs": 0.0},
+    "abs time end [ps]": {"type": "float", "max_abs": 4002.0, "min_abs": 0.0}, 
+    "step [ps]": {"type": "float", "max_rel": 4002.0, "min_rel": 6.68E-4}, 
+    "time_zero": {"type": "float", "max_rel": 4002.0, "min_rel": 0.0}, 
     "experiment_title": {}
 }
