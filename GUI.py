@@ -19,32 +19,29 @@ import webbrowser
 
 
 # TO DO list revised by Cris and Ankit: (Deadline: 1st of April)
-#
-#   · Verify I've corrected oversight where relative time limits are checked against 0 
-#     and 4002, not against 0 - timezero and 4002 - timezero                   [V]
 #  
-#   · Checkbox for error estimation, list for autorange (manual, at the 
-#     beginning, at every step)                                                [V]
-#  
-#   · Verify time zero is safe                                                 [ ]
-#
 #   · Average all scans while (or at the end) experiment are taking place      [ ]
+#
+#   · Make executable and installer                                            [ ]
+#      · Revise what packages do I need                                            [ ]
+#      · What do I do with the Kinesis C-API installation?                         [ ]
+#      ·                                                                           [ ]
+#      ·                                                                           [ ]
 #
 #   · Build documentation                                                      [ ]
 #
 #   · Fix layout on monitoring window                                          [ ]
 #
+#   · Append gain at every step when autorangingat every step                  [ ]
+#
+#   · Lockin initialized to values writen on default_config.json               [ ]
+#
 #
 # Less important TO DO list: No order in particular
-#   · Choose settling precission or at least verify
 #   · Define waiting time and number of pulses averaged and store in csv
-#   · If OVERLOAD then AUTOGAIN else proceed
 #   · Implement loading different experiment presets, right now there only one, default, and the 
 #     user overwrites it to save a preset.
 #   · Move functions on GUI.py to their own library
-#   · Add boolean flags to experiment that exchange speed for acquracy (measure noise at every step,
-#     autogain at every step...) Maybe just remove measuring the error
-#   · Add comment header to CSV
 #
 #
 # User Notes:
@@ -225,7 +222,27 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue,
         
 
 
-def initialize_button():
+def initialize_button(default_values_delay_stage):
+
+    # First validate that delay stage was configured to safe parameters
+    Acceleration_mm_per_s2 = default_values_delay_stage["Acceleration_mm_per_s2"]
+    MaxVelocity_mm_per_s = default_values_delay_stage["MaxVelocity_mm_per_s"]
+
+    validation_rules_file_path = 'Utils/validation_rules.json'
+    try:
+        with open(validation_rules_file_path, "r") as json_file:
+            validation_rules = json.load(json_file)
+    except Exception as e:
+        raise Exception(f"An error occured when opening {validation_rules_file_path}\n{e}")
+
+
+    valid_parameter, _ = is_value_valid("Acceleration_mm_per_s2", Acceleration_mm_per_s2, validation_rules["Acceleration_mm_per_s2"])
+    if not valid_parameter:
+            return
+    
+    valid_parameter, _ = is_value_valid("MaxVelocity_mm_per_s", MaxVelocity_mm_per_s, validation_rules["MaxVelocity_mm_per_s"])
+    if not valid_parameter:
+            return
 
     # Create the waiting window
     waiting_window = Toplevel(main_window)
@@ -390,7 +407,7 @@ def get_parse_validate_screen_params(entries_widgets):
         screen_values[parameter_name] = entries_widgets[parameter_name].get()
 
     # Construct dict holding validation rules for each value
-    validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+    validation_rules_file_path = 'Utils/validation_rules.json'
     try:
         with open(validation_rules_file_path, "r") as json_file:
             validation_rules = json.load(json_file)
@@ -430,7 +447,7 @@ def save_parameters(experiment_preset):
 
 
         ### We first validate that the time zero parameter is safe (all absolute parameters reference time zero)
-        validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+        validation_rules_file_path = 'Utils/validation_rules.json'
         try:
             with open(validation_rules_file_path, "r") as json_file:
                 validation_rules = json.load(json_file)
@@ -511,7 +528,7 @@ def launch_experiment(experiment_data_queue):
 
 
         ### We first validate that the time zero parameter is safe (all absolute parameters reference time zero)
-        validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+        validation_rules_file_path = 'Utils/validation_rules.json'
         try:
             with open(validation_rules_file_path, "r") as json_file:
                 validation_rules = json.load(json_file)
@@ -760,7 +777,7 @@ def estimate_experiment_timespan():
 
 
         ### We first validate that the time zero parameter is safe (all absolute parameters reference time zero)
-        validation_rules_file_path = 'Utils\experiment_preset_validation_rules.json'
+        validation_rules_file_path = 'Utils/validation_rules.json'
         try:
             with open(validation_rules_file_path, "r") as json_file:
                 validation_rules = json.load(json_file)
@@ -1290,7 +1307,7 @@ def main():
             row_num += 1
 
         # This button initializes the devices prior to running the experiment
-        button = tk.Button(Initialization_screen, text="Initialize devices", command=initialize_button)
+        button = tk.Button(Initialization_screen, text="Initialize devices", command=partial(initialize_button, default_values_delay_stage))
         button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 
 

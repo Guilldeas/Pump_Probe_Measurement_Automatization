@@ -65,7 +65,7 @@ def initialization(Troubleshooting):
 
     except Exception as e:
 
-        raise Exception(f"Error while loading Thorlabs' Kinesis lirbary:\n{e}\nPlease verify that you have installed Kinesis Software")
+        raise Exception(f"Error while loading Thorlabs' Kinesis lirbary:\n{e}\nPlease verify that you have installed Kinesis Software and that it is in the expected path")
 
 
     global lib 

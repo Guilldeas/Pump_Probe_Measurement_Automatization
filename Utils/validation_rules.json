@@ -3,5 +3,7 @@
     "abs time end [ps]": {"type": "float", "max_abs": 4002.0, "min_abs": 0.0}, 
     "step [ps]": {"type": "float", "max_rel": 4002.0, "min_rel": 6.68E-4}, 
     "time_zero": {"type": "float", "max_rel": 4002.0, "min_rel": 0.0}, 
+    "Acceleration_mm_per_s2": {"type": "int", "max_rel": 10000, "min_rel": 0.0}, 
+    "MaxVelocity_mm_per_s": {"type": "int", "max_rel": 400, "min_rel": 0.0}, 
     "experiment_title": {}
 }
