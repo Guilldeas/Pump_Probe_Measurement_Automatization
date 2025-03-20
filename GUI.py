@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import os
 import datetime
 import webbrowser
+import numpy as np
 
 
 # TO DO list revised by Cris and Ankit: (Deadline: 1st of April)
@@ -25,8 +26,8 @@ import webbrowser
 #   · Make executable and installer                                            [ ]
 #      · Revise what packages do I need                                            [ ]
 #      · What do I do with the Kinesis C-API installation?                         [ ]
-#      ·                                                                           [ ]
-#      ·                                                                           [ ]
+#      · Recompile requirements                                                    [ ]
+#      · Package Kinesis lib in repo                                               [ ]
 #
 #   · Build documentation                                                      [ ]
 #
@@ -62,6 +63,13 @@ previous_scans = []
 line_object = None
 lines_list = []
 prev_scan = 0
+Scans = []
+first_iteration = False
+average_line_object = None
+'''Scans = []
+prev_photodiode_data = []
+
+'''
 
 # These variables are initialized as None so that we can check if they have 
 # been intialized later on and perform some action (plt.close, join etc) that
@@ -78,6 +86,97 @@ experiment_data_queue = queue.Queue()    # Sends data from experiment thread to 
 abort_queue = queue.Queue()              # Sends abort signal from GUI to experiment thread to end func safely
 error_queue = queue.Queue()              # Sends Exceptions caught in experiment and initialization threads 
                                    # to be displayed on GUI 
+
+
+
+def average_scans(Completed_scans, new_data):
+    # We want to measure a live average, that is we need to update 
+    # each averaged point in a graph as new points come in, to do so
+    # we use this function which averages multiple lists and deals
+    # with problems where the last scan is incomplete and thus a smaller
+    # length, to do so it splits the averaging like so:
+    #  
+    # We slice completed scans by the len of the uncompleted scan
+    # [a_0, a_1| a_2, a_3, a_4, a_5]
+    # [b_0, b_1| b_2, b_3, b_4, b_5]
+    #
+    # Current scan taking place that is incomplete
+    # [c_0, c_1]
+    #
+    # average left slices: [a_0, a_1], [b_0, b_1], [c_0, c_1]
+    # average right slices: [a_2, a_3, a_4, a_5], [b_2, b_3, b_4, b_5]]
+    #
+    # We splice left and right averages into a final average
+    # [avg_0, avg_1, avg_2, avg_3, avg_4, avg_5]
+
+
+    def average_equal_lists(scans_list):
+
+        try:
+            # Takes a list of equal sized lists and returns an 
+            # averaged list
+
+            # Cast lists to arrays for easier element wise addition
+            scans_array_list = []
+            for scan in scans_list:
+                scans_array_list.append(np.array(scan))
+            
+            # Average all scan arrays in list by summing them
+            averaged_scans = np.zeros_like(np.array(scans_array_list[0]))
+            for scan in scans_array_list:
+                averaged_scans += scan
+            
+            # And dividing by amount of arrays
+            averaged_scans = averaged_scans / len(scans_array_list)
+            
+            return averaged_scans.tolist()
+        
+        except ValueError:
+            print(f'An ERROR occured when adding something in the following list:\n{scans_array_list}')
+
+            raise ValueError
+
+    # Append new data to completed scans
+    Scans_ls = Completed_scans
+    Scans_ls.append(new_data)
+
+    # Deal with edge case where there are not enough scans to average
+    if len(Scans_ls) > 1:
+
+        # Find whether our averaging needs to deal with incompleted scans
+        # by checkin whether the last scan is smaller than the previous one  
+        if len(Scans_ls[-1]) == len(Scans_ls[-2]):
+            return average_equal_lists(Scans_ls)
+
+        else:
+
+            # Compile list of scans sliced to match the length of the 
+            # uncompleted scan
+            left_slices_list = []
+            for scan in Scans_ls[:-1]:
+                left_slices_list.append(scan[:len(Scans_ls[-1])])
+            
+            # Include uncomplete scan
+            left_slices_list.append(Scans_ls[-1])
+            
+            # Compile a second list of the "leftover" right slices
+            right_slices_list = []
+            for scan in Scans_ls[:-1]:
+                right_slices_list.append(scan[len(Scans_ls[-1]):])
+            
+            # Average each of the groups, now with matching length
+            left_average = average_equal_lists(left_slices_list)
+            right_average = average_equal_lists(right_slices_list)
+
+            # Combine them into a final average
+            return left_average + right_average
+
+    # This return signals that there is no average to plot for only
+    # one scan
+    else:
+        return None
+
+
 
 def show_screen_from_menu(screen_name):
     """ Wrapper function to use `show_screen` inside OptionMenu """
@@ -158,12 +257,12 @@ def restore_output():
     sys.stderr = sys.__stderr__
 
 
-def initialization_thread_logic():
+def initialization_thread_logic(Kinesis_library_path):
     
     # Catch exceptions while initializing and display them
     # later to user to aid troubleshooting 
     try:
-        core_logic.initialization(Troubleshooting=False)
+        core_logic.initialization(Kinesis_library_path, Troubleshooting=False)
         #core_logic.initialization_dummy(Troubleshooting=False)
 
     # Exceptions dont propagate upwards when using threads, we have to send it to main code through a Queue
@@ -184,6 +283,7 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue,
 
             # Perform experiment and get data at the end
             abort_queue.put(False)  # before we start the experiment we reset the abort flag to false
+            global Scans
             result = core_logic.perform_experiment(parameters_dict, 
                                                    experiment_data_queue, 
                                                    abort_queue, 
@@ -191,7 +291,8 @@ def experiment_thread_logic(parameters_dict, experiment_data_queue, abort_queue,
                                                    scan, 
                                                    num_scans, 
                                                    error_measurement_type,
-                                                   autoranging_type) 
+                                                   autoranging_type,
+                                                   Scans) 
 
             # User has chosen to abort experiment and thus we receive an error code instead
             if isinstance(result, int):
@@ -276,8 +377,20 @@ def initialize_button(default_values_delay_stage):
     # Redirect stdout and stderr to the queue
     capture_output(output_queue)
 
+    # Get kinesis library path to delegate to the user appropiately tracking it's location uwu
+    try:
+        # Extract default configuration values for both devices from the configuration file
+        default_config_file_path = 'Utils\default_config.json'
+        with open(default_config_file_path, "r") as json_file:
+            default_config = json.load(json_file)
+            
+    except Exception as e:
+        raise Exception(f"An error occured when opening {default_config_file_path}\n{e}")
+    
+    Kinesis_library_path = default_config["Lockin Default Config Params"]["Kinesis_Library_Path"]
+
     # Run initialization on a different thread
-    initialization_thread = threading.Thread(target=initialization_thread_logic)
+    initialization_thread = threading.Thread(target=initialization_thread_logic, args=(Kinesis_library_path, ))
     initialization_thread.start()
 
     # Function to check for updates from the queue
@@ -575,9 +688,14 @@ def launch_experiment(experiment_data_queue):
         ### Create a window to monitor experiment
         monitoring_window = Toplevel(main_window)
         monitoring_window.title("Experiment in progress")
-        monitoring_window.geometry("2000x800")
+        monitoring_window.geometry('1920x1080')
         monitoring_window.resizable(True, True)
         monitoring_window.grab_set()  # Make it modal (blocks interaction with other windows)
+
+        # Configure grid weights for entire
+        monitoring_window.grid_rowconfigure(0, weight=1)  # Allow vertical expansion
+        monitoring_window.grid_columnconfigure(0, weight=1)  # Logging column
+        monitoring_window.grid_columnconfigure(2, weight=4)  # Graph gets 4x more space than log
 
 
 
@@ -595,10 +713,6 @@ def launch_experiment(experiment_data_queue):
         listbox.config(yscrollcommand=scrollbar.set)
         scrollbar.config(command=listbox.yview)
 
-        # Ensure resizing
-        monitoring_window.grid_rowconfigure(0, weight=1)
-        monitoring_window.grid_columnconfigure(0, weight=1)
-
         # Add a label to inform the user
         label = tk.Label(monitoring_window, text="Please wait while the experiment takes place...")
         label.grid(padx=20, pady=20)
@@ -608,11 +722,11 @@ def launch_experiment(experiment_data_queue):
         ### Create live graph
 
         # Create figure and axes
-        fig, axes = plt.subplots()
+        fig, axes = plt.subplots(figsize=(10, 5), dpi=100)
         axes.set_xlabel('t [ps]')
         axes.set_ylabel('PD [Vrms]')
 
-        # Create an empty graph to grab a reference to the line object, this is the curve on the graph
+        # Create an empty graph to grab a reference for the line object, this is the curve on the graph
         # and we'll update it for every new data point, we do this because updating preserves user 
         # zoom and pan on the graph. Simply redrawing the whole graph would reset them
         global line_object, lines_list, cmap
@@ -627,7 +741,7 @@ def launch_experiment(experiment_data_queue):
 
         # Canvas for Matplotlib
         canvas = FigureCanvasTkAgg(fig, master=graph_frame)
-        canvas.get_tk_widget().grid(row=0, column=0, sticky="ew")
+        canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
         # Add Navigation Toolbar for Zoom and Scroll on it's own 
         # toolbar because NavigationToolbar2Tk() internally uses pack() which conflicts
@@ -650,16 +764,24 @@ def launch_experiment(experiment_data_queue):
             # Close figure
             plt.close(fig)
 
-        button = tk.Button(monitoring_window, text="Stop experiment", command=abort_experiment)
-        button.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+            # Clear previous data
+            '''global previous_scans, Scans'''
+            global previous_scans, Scans
+            previous_scans = []
+            Scans = []
+
+
+        Stop_early_button = tk.Button(monitoring_window, text="Stop experiment early", command=abort_experiment)
+        Stop_early_button.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
 
 
         # Queue for reading prints from core_logic functions and displaying them on listbox
         output_queue = queue.Queue()
 
-        # Redirect stdout and stderr to the queue
-        capture_output(output_queue)
+        # Redirect stdout and stderr to the queue. We capture prints that would go into the command line
+        # and redirect them to the experiment log
+        #capture_output(output_queue)
 
         # Run experiment on a different thread
         num_scans = int(entries["num_scans"].get())
@@ -679,11 +801,15 @@ def launch_experiment(experiment_data_queue):
         global prev_scan
         prev_scan = 0
 
-        # Function to check for updates from the queue
+        # Function to check for updates from the queue.
+        # Proceed with caution, this is one of the hackiest most convoluted functions in this project...
+        # If you have to troubleshoot this... well Im sorry for you.
         def monitor_experiment():
 
-            global line_object, lines_list, prev_scan, cmap
+            global line_object, lines_list, prev_scan, cmap, first_iteration, average_line_object
 
+            # First we wait for a command print from perform_experiment()
+            # once we receive it we print it in the log and continue with graphing
             while not output_queue.empty():
                 new_message = output_queue.get()
                 listbox.insert(tk.END, new_message)
@@ -701,6 +827,8 @@ def launch_experiment(experiment_data_queue):
                     photodiode_data = data_packet["Photodiode data"]
                     photodiode_data_errors = data_packet["Photodiode data errors"]
                     scan_number = int(data_packet["Scan number"])
+                    live_average = data_packet["Live average"]
+
 
                     # If we detect that arriving data corresponds to a new scan we
                     # create a new line object to draw on a different curve
@@ -712,12 +840,21 @@ def launch_experiment(experiment_data_queue):
                         new_color = cmap(color_fraction)
 
                         # We then generate a new line object and append it to the list
-                        new_line_object, = axes.plot([], [], linestyle='-',color=new_color, label=f"scan {scan_number}")
+                        new_line_object, = axes.plot([], [], linestyle='-', alpha=0.5, color=new_color, label=f"scan {scan_number}")
                         lines_list.append(new_line_object)
                         line_object = new_line_object
                         prev_scan = scan_number
 
+                        # And generate a new line object for the average, but we only need to draw one
+                        # average so
+                        
+                        if first_iteration:
+                            average_line_object, = axes.plot([], [], linestyle='-', color="deepskyblue", label=f"Average")
 
+                            # Make sure we don't create any new average line objects on the following scans
+                            first_iteration = False
+
+                    
                     # We update only the last line, corresponding to current scan data
                     # that way we keep the curves for the previous scans untouched
                     line_to_update = lines_list[-1]
@@ -726,6 +863,11 @@ def launch_experiment(experiment_data_queue):
                     line_to_update.set_xdata(positions[:len(photodiode_data)])
                     line_to_update.set_ydata(photodiode_data)
 
+                    # We then update the average if there is one to average
+                    if average_line_object is not None and live_average is not None:
+                        average_line_object.set_xdata(positions)
+                        average_line_object.set_ydata(live_average)
+
                     axes.relim()           # Recompute the data limits based on current data
                     axes.autoscale_view()  # Auto-adjust the view to the new limits
                     axes.legend()
@@ -733,8 +875,11 @@ def launch_experiment(experiment_data_queue):
                     # Update Canvas
                     canvas.draw()
 
-                # Update the monitoring window at 100ms intervals
-                monitoring_window.after(100, monitor_experiment)
+
+                # Update the monitoring window at 10ms intervals
+                monitoring_window.after(10, monitor_experiment)
+
+
 
             # Close experiment thread after it's done
             else:
@@ -742,16 +887,21 @@ def launch_experiment(experiment_data_queue):
                 label.config(text="Experiment completed")
 
                 # Clear previous data
+                global previous_scans, Scans
                 previous_scans = []
+                Scans = []
+                '''Scans = []'''
 
-                # Add button to close window
-                button = tk.Button(monitoring_window, text="Ok", command=partial(close_window, monitoring_window))
-                button.grid(row=2, column=0, padx=20, pady=20, sticky="s")
+                # Remove stop early button from screen
+                Stop_early_button.destroy()
 
                 # Close figure
                 plt.close(fig)
 
-        # Start checking monitoring the experiment
+
+        # Start monitoring the experiment
+        global first_iteration
+        first_iteration = True
         monitor_experiment()
         
 
@@ -907,7 +1057,7 @@ def create_experiment_gui_from_dict(parameters_dict):
 
     experiment_parameters_frame = Screens["Experiment screen"]["Child frame"]
 
-    # Erase previous screen
+    # Erase previous screen by destroying all of it's children
     for widget in experiment_parameters_frame.winfo_children():
         widget.destroy()
 
@@ -923,7 +1073,7 @@ def create_experiment_gui_from_dict(parameters_dict):
 
     # First we start with the entries that are not iterable (this snippet is not
     # very readable, please refer to the for loop below for comments)
-    label = tk.Label(experiment_parameters_frame, text="experiment file name", anchor="w")
+    label = tk.Label(experiment_parameters_frame, text="experiment file name (avoid special characters)", anchor="w")
     label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
     entry = tk.Entry(experiment_parameters_frame)
     entry.grid(row=row_num, column=1, padx=10, pady=5, sticky="w")
@@ -1155,7 +1305,11 @@ def main():
     global main_window
     main_window = tk.Tk()
     main_window.title("Automatic Pump Probe")
-    main_window.geometry("1200x550")
+    
+    # Get screen size
+    #main_window.attributes('-fullscreen', True)
+    main_window.geometry('1920x1080')
+
 
     # The whole code is inside a try loop, exceptions are allowed to propagate upwards and are caught at the end showing an error messagebox
     try:
@@ -1212,9 +1366,9 @@ def main():
         # be shown or hidden depending on what screen we want to display
         Initialization_screen = tk.Frame(main_window)
 
-        Initialization_screen.grid(row=2, column=0, padx=10, pady=10)#, sticky="ew")
-        third_label = tk.Label(Initialization_screen, text="Third row label Child", anchor="w")
-        third_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        Initialization_screen.grid(row=2, column=0, padx=10, pady=10)
+        #third_label = tk.Label(Initialization_screen, text="Third row label Child", anchor="w")
+        #third_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
             
 
         Screens["Initialization screen"] = {}
@@ -1223,19 +1377,17 @@ def main():
 
 
         # Add text (label) prompting user to introduce configuration parameters
-        label = tk.Label(Initialization_screen, text="Enter device initialization parameters", anchor="w")
-        label.grid(row=0, column=0, padx=10, pady=5)#, sticky="w")
+        label = tk.Label(Initialization_screen, text="Device initialization parameters (Read only, edit from Utils/default_config.json)", anchor="w")
+        label.grid(row=0, column=0, padx=10, pady=5)
 
         # The widgets will be placed in a grid with respect to each other,
         # to define their separation we define a "no place" x and y pad radius measured 10px around them
         # finally we specify "w" to format them to the left or west of their "cell"
-        row_num = 0
-        label.grid(row=row_num, column=0, padx=10, pady=5, sticky="w")
+        label.grid(row=1, column=0, padx=10, pady=5, sticky="w")
 
         # Place an empty label at the end to add some space
         spacer = tk.Label(Initialization_screen, text="")  # An empty label
-        spacer.grid(row=row_num, column=0, pady=10)  # Adds vertical space
-        row_num += 1
+        spacer.grid(row=2, column=0, pady=10)  # Adds vertical space
 
 
 
@@ -1247,7 +1399,7 @@ def main():
 
         # We place the frame indexing it to the initialization screen frame
         delay_parameters_frame = tk.Frame(Initialization_screen)
-        delay_parameters_frame.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        delay_parameters_frame.grid(row=3, column=0, padx=10, pady=10, sticky="w")
 
         row_num = 0
         label = tk.Label(delay_parameters_frame,  # Instead of placing the widget in the main window we now place it on the frame
@@ -1282,7 +1434,7 @@ def main():
         ############################### Frame for lockin ###############################
         # Repeat for lockin parameters
         lockin_parameters_frame = tk.Frame(Initialization_screen)
-        lockin_parameters_frame.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        lockin_parameters_frame.grid(row=4, column=0, padx=10, pady=10, sticky="w")
 
         row_num = 0
         label = tk.Label(lockin_parameters_frame, text="Lock-in parameters", anchor="w")
@@ -1308,7 +1460,7 @@ def main():
 
         # This button initializes the devices prior to running the experiment
         button = tk.Button(Initialization_screen, text="Initialize devices", command=partial(initialize_button, default_values_delay_stage))
-        button.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        button.grid(row=5, column=0, padx=10, pady=5, sticky="w")
 
 
 
@@ -1379,9 +1531,6 @@ def main():
 
         ################################### Top bar ###################################
 
-        def donothing():
-            x = 0
-        
         menubar = tk.Menu(main_window)
         filemenu = tk.Menu(menubar, tearoff=0)
         filemenu.add_command(label="Initialization screen", command=partial(show_screen_from_menu, "Initialization screen"))

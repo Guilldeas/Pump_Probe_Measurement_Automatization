@@ -11,7 +11,6 @@ import json
 import core_logic_functions as clfun
 
 
-
 # REMOVE LATER!
 # Dummy functios to test development on machines that are not connected to experiment devices
 def initialization_dummy(Troubleshooting):
@@ -26,6 +25,99 @@ def perform_experiment_dummy(Troubleshooting):
     for task in range(1, 3):
         time.sleep(1)
         print(f"Scan {task} completed")
+
+
+
+
+def average_scans(Completed_scans, new_data):
+    # We want to measure a live average, that is we need to update 
+    # each averaged point in a graph as new points come in, to do so
+    # we use this function which averages multiple lists and deals
+    # with problems where the last scan is incomplete and thus a smaller
+    # length, to do so it splits the averaging like so:
+    #  
+    # We slice completed scans by the len of the uncompleted scan
+    # [a_0, a_1| a_2, a_3, a_4, a_5]
+    # [b_0, b_1| b_2, b_3, b_4, b_5]
+    #
+    # Current scan taking place that is incomplete
+    # [c_0, c_1]
+    #
+    # average left slices: [a_0, a_1], [b_0, b_1], [c_0, c_1]
+    # average right slices: [a_2, a_3, a_4, a_5], [b_2, b_3, b_4, b_5]]
+    #
+    # We splice left and right averages into a final average
+    # [avg_0, avg_1, avg_2, avg_3, avg_4, avg_5]
+
+
+    def average_equal_lists(scans_list):
+
+        try:
+            # Takes a list of equal sized lists and returns an 
+            # averaged list
+
+            # Cast lists to arrays for easier element wise addition
+            scans_array_list = []
+            for scan in scans_list:
+                scans_array_list.append(np.array(scan))
+            
+            # Average all scan arrays in list by summing them
+            averaged_scans = np.zeros_like(np.array(scans_array_list[0]))
+            for scan in scans_array_list:
+                averaged_scans += scan
+            
+            # And dividing by amount of arrays
+            averaged_scans = averaged_scans / len(scans_array_list)
+            
+            return averaged_scans.tolist()
+        
+        except ValueError:
+            print(f'An ERROR occured when adding something in the following list:\n{scans_array_list}')
+
+            raise ValueError
+
+    # Append new data to completed scans
+    Scans_ls = Completed_scans.copy()
+    Scans_ls.append(new_data)
+
+    # Deal with edge case where there are not enough scans to average
+    if len(Scans_ls) > 1:
+
+        # Find whether our averaging needs to deal with incompleted scans
+        # by checkin whether the last scan is smaller than the previous one  
+        if len(Scans_ls[-1]) == len(Scans_ls[-2]):
+            return average_equal_lists(Scans_ls)
+
+        else:
+
+            # Compile list of scans sliced to match the length of the 
+            # uncompleted scan
+            left_slices_list = []
+            for scan in Scans_ls[:-1]:
+                left_slices_list.append(scan[:len(Scans_ls[-1])])
+            
+            # Include uncomplete scan
+            left_slices_list.append(Scans_ls[-1])
+            
+            # Compile a second list of the "leftover" right slices
+            right_slices_list = []
+            for scan in Scans_ls[:-1]:
+                right_slices_list.append(scan[len(Scans_ls[-1]):])
+            
+            # Average each of the groups, now with matching length
+            left_average = average_equal_lists(left_slices_list)
+            right_average = average_equal_lists(right_slices_list)
+
+            # Combine them into a final average
+            return left_average + right_average
+
+    # This return signals that there is no average to plot for only
+    # one scan
+    else:
+        return None
+
+
+
 
 
 # --- Request Settling Time ---
@@ -53,15 +145,15 @@ def request_settling_time(time_constant, filter_slope, verbose=False):
 
 
 ####################################### MAIN CODE #######################################
-def initialization(Troubleshooting):
+def initialization(Kinesis_library_path, Troubleshooting):
 
     print(f"Please wait for initial setup\n")
     
     try:
         if sys.version_info < (3, 8):
-            os.chdir(r"C:\Program Files\Thorlabs\Kinesis")
+            os.chdir(Kinesis_library_path)
         else:
-            os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
+            os.add_dll_directory(Kinesis_library_path)
 
     except Exception as e:
 
@@ -311,7 +403,7 @@ def initialization(Troubleshooting):
 
     
     
-def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan, num_scans, error_measurement_type, autoranging_type):
+def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig, scan, num_scans, error_measurement_type, autoranging_type, Scans):
 
     global adapter
 
@@ -483,7 +575,14 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
             total_timestamp = time.time() - startup_timestamp
             total.append(total_timestamp)
 
+        # After every data point acquisition we calculate the live average 
+        # (do so only if there is something to average)
+        live_average = None
+        if scan > 0:
+            print(f"Previous to averaging Scans was: {Scans}")
+            live_average = average_scans(Completed_scans=Scans, new_data=Photodiode_data)
 
+        print(f"\nlive average: {live_average}")
 
         # Send data through queue to the GUI script to draw it. Do it with copies or else
         # we'll pass references to the local lists "Photodiode_data" and the GUI will
@@ -496,13 +595,13 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
                         "Photodiode data": Photodiode_data.copy(), 
                         "Photodiode data errors": Photodiode_data_errors.copy(),
                         "Positions": Positions.copy(),
-                        "Scan number": scan
+                        "Scan number": scan,
+                        "Live average": live_average,
                       }
         experiment_data_queue.put(data_packet)
 
     print(f"Experiment is finished\n")
 
-    # POSSIBLE BUG: What happens when we don't run one of the functions?
     # Report to user the average percentage of total iteration time spent on each function
     if profiling:
         print(f"The average time and percentage spent on each step for every action taken was:")
@@ -559,29 +658,57 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
             signal_type_str = "[Arms]"
 
     # Create a DataFrame with headers
-    if error_measurement_type == "At every point":
-        data_df = pd.DataFrame({
-            "Absolute Time [ps]": Positions,
-            "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
-            "Signal level " + signal_type_str: Photodiode_data,
-            "Signal error " + signal_type_str: Photodiode_data_errors
-        })
-    
-    if error_measurement_type == "Once at the start":
-        data_df = pd.DataFrame({
-            "Absolute Time [ps]": Positions,
-            "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
-            "Signal level " + signal_type_str: Photodiode_data,
-            "Signal error (at the start)" + signal_type_str: Photodiode_data_errors
-        })
-    
-    elif error_measurement_type == "Never":
-        data_df = pd.DataFrame({
-            "Absolute Time [ps]": Positions,
-            "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
-            "Signal level " + signal_type_str: Photodiode_data,
-        })
-    
+    # So sorry for this hack but it's my last day working here and it's 7pm
+    if live_average is not None:
+        if error_measurement_type == "At every point":
+            data_df = pd.DataFrame({
+                "Absolute Time [ps]": Positions,
+                "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+                "Signal level st current scan" + signal_type_str: Photodiode_data,
+                "Signal error " + signal_type_str: Photodiode_data_errors,
+            })
+        
+        if error_measurement_type == "Once at the start":
+            data_df = pd.DataFrame({
+                "Absolute Time [ps]": Positions,
+                "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+                "Signal level " + signal_type_str: Photodiode_data,
+                "Signal error (at the start)" + signal_type_str: Photodiode_data_errors,
+                "Average of previous scans" + signal_type_str: live_average
+            })
+        
+        elif error_measurement_type == "Never":
+            data_df = pd.DataFrame({
+                "Absolute Time [ps]": Positions,
+                "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+                "Signal level " + signal_type_str: Photodiode_data,
+                "Average of previous scans" + signal_type_str: live_average
+            })
+
+    else:
+        if error_measurement_type == "At every point":
+            data_df = pd.DataFrame({
+                "Absolute Time [ps]": Positions,
+                "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+                "Signal level st current scan" + signal_type_str: Photodiode_data,
+                "Signal error " + signal_type_str: Photodiode_data_errors,
+            })
+        
+        if error_measurement_type == "Once at the start":
+            data_df = pd.DataFrame({
+                "Absolute Time [ps]": Positions,
+                "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+                "Signal level " + signal_type_str: Photodiode_data,
+                "Signal error (at the start)" + signal_type_str: Photodiode_data_errors
+            })
+        
+        elif error_measurement_type == "Never":
+            data_df = pd.DataFrame({
+                "Absolute Time [ps]": Positions,
+                "Time absolute On-axis error [+/-ps] (placeholder data)": Position_errors,
+                "Signal level " + signal_type_str: Photodiode_data,
+            })
+
     # Get current date as a string
     date_string = datetime.now().strftime("%Hh_%Mmin_%dd_%mm_%Yy")
 
@@ -613,6 +740,10 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
     file_name = parameters_dict["experiment_name"] + "_scan_number_" + str(scan) + ".png"
     file_path = os.path.join(data_folder, file_name)
     fig.savefig(file_path, dpi=300)  # Save with high resolution
+
+    # Append completed scan to global list
+    Scans.append(Photodiode_data)
+    print(f"\nAppended to scans: {Photodiode_data}\nScans is now: {Scans}")
 
     return data_df
 

@@ -2,8 +2,8 @@
     "Delay Stage Default Config Params": {
         "SerialNumber": "103391384",
         "Channel": 1,
-        "Acceleration_mm_per_s2": 9000,
-        "MaxVelocity_mm_per_s": 390
+        "Acceleration_mm_per_s2": 4500,
+        "MaxVelocity_mm_per_s": 150
     },
     "Lockin Default Config Params": {
         "USBPort": "COM5",
