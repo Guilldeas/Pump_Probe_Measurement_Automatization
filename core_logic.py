@@ -3,15 +3,12 @@ import numpy as np
 import os
 import sys
 from ctypes import *
-import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
-from math import ceil
 import json
 import core_logic_functions as clfun
 
 
-# REMOVE LATER!
 # Dummy functios to test development on machines that are not connected to experiment devices
 def initialization_dummy(Troubleshooting):
     print("Start initializaiton")
@@ -145,20 +142,24 @@ def request_settling_time(time_constant, filter_slope, verbose=False):
 
 
 ####################################### MAIN CODE #######################################
-def initialization(Kinesis_library_path, Troubleshooting):
+def initialization(Troubleshooting):
 
     print(f"Please wait for initial setup\n")
     
+    
     try:
+        # Get the directory of the current script
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        Kinesis_folder_path = os.path.join(current_dir, "Utils", "Kinesis")
         if sys.version_info < (3, 8):
-            os.chdir(Kinesis_library_path)
+            os.chdir(Kinesis_folder_path)
         else:
-            os.add_dll_directory(Kinesis_library_path)
+            os.add_dll_directory(Kinesis_folder_path)
 
     except Exception as e:
 
-        raise Exception(f"Error while loading Thorlabs' Kinesis lirbary:\n{e}\nPlease verify that you have installed Kinesis Software and that it is in the expected path")
-
+        raise Exception(f"Error while loading Thorlabs' Kinesis lirbary:\n{e}\nPlease verify that you have installed Kinesis Software and that it is located in softwares subfolder Utils")
+    
 
     global lib 
     lib = cdll.LoadLibrary("Thorlabs.MotionControl.Benchtop.BrushlessMotor.dll")
@@ -579,10 +580,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
         # (do so only if there is something to average)
         live_average = None
         if scan > 0:
-            print(f"Previous to averaging Scans was: {Scans}")
             live_average = average_scans(Completed_scans=Scans, new_data=Photodiode_data)
-
-        print(f"\nlive average: {live_average}")
 
         # Send data through queue to the GUI script to draw it. Do it with copies or else
         # we'll pass references to the local lists "Photodiode_data" and the GUI will
@@ -725,7 +723,7 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
     file_path = os.path.join(data_folder, file_name)
 
     # Create a string storing relevant experiment data
-    experiment_params = str(f"Date: {date_string},Experiment parameters\n  time zero: {time_zero}ps,time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}V")
+    experiment_params = str(f"Date: {date_string},Experiment parameters\n  time zero: {time_zero}ps,time constant: {time_constant}s,Filter slope: {clfun.request_filter_slope(adapter)}dB/Oct,Input range: {clfun.request_range(adapter)}")
 
     # Write the parameters and data to a CSV file
 
@@ -743,7 +741,6 @@ def perform_experiment(parameters_dict, experiment_data_queue, abort_queue, fig,
 
     # Append completed scan to global list
     Scans.append(Photodiode_data)
-    print(f"\nAppended to scans: {Photodiode_data}\nScans is now: {Scans}")
 
     return data_df
 

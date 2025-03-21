@@ -1,10 +1,5 @@
 import time
-import numpy as np
 from ctypes import *
-import pyvisa as visa 
-import matplotlib.pyplot as plt
-import pandas as pd
-from datetime import datetime
 from pymeasure.adapters import SerialAdapter
 from math import sqrt, pow
 
